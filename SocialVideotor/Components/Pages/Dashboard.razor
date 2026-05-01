@@ -1,0 +1,125 @@
+@page "/"
+@using SocialVideotor.Models
+@using SocialVideotor.Services
+@inject IProjectService ProjectService
+@inject NavigationManager NavigationManager
+@rendermode InteractiveServer
+
+<PageTitle>SocialVideotor - Dashboard</PageTitle>
+
+<FluentStack Orientation="Orientation.Vertical" Style="gap: 24px;">
+    <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="justify-content: space-between; width: 100%;">
+        <div>
+            <h1 style="margin: 0; font-size: 2rem;">🎬 SocialVideotor</h1>
+            <p style="margin: 4px 0 0 0; color: var(--neutral-foreground-rest);">Create engaging social media video clips with AI</p>
+        </div>
+        <FluentButton Appearance="Appearance.Accent" OnClick="@CreateNewProject">
+            <FluentIcon Value="@(new Icons.Regular.Size20.Add())" Slot="start" />
+            New Project
+        </FluentButton>
+    </FluentStack>
+
+    @if (!projects.Any())
+    {
+        <FluentCard Style="padding: 48px; text-align: center; width: 100%;">
+            <FluentIcon Value="@(new Icons.Regular.Size48.Video())" Style="color: var(--accent-fill-rest);" />
+            <h3>No projects yet</h3>
+            <p style="color: var(--neutral-foreground-hint);">Create your first social media video project</p>
+            <FluentButton Appearance="Appearance.Accent" OnClick="@CreateNewProject">Get Started</FluentButton>
+        </FluentCard>
+    }
+    else
+    {
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; width: 100%;">
+            @foreach (var project in projects)
+            {
+                <FluentCard Style="padding: 20px; cursor: pointer;" @onclick="@(() => OpenProject(project.Id))">
+                    <FluentStack Orientation="Orientation.Vertical" Style="gap: 12px;">
+                        <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="justify-content: space-between;">
+                            <h3 style="margin: 0; font-size: 1.1rem;">@project.Name</h3>
+                            <FluentBadge Appearance="@GetStatusAppearance(project.Status)">@project.Status</FluentBadge>
+                        </FluentStack>
+
+                        <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px; flex-wrap: wrap;">
+                            @foreach (var platform in project.TargetPlatforms)
+                            {
+                                <FluentBadge>@GetPlatformEmoji(platform) @platform</FluentBadge>
+                            }
+                        </FluentStack>
+
+                        <FluentStack Orientation="Orientation.Horizontal" Style="justify-content: space-between;">
+                            <span style="color: var(--neutral-foreground-hint); font-size: 0.85rem;">
+                                @project.Clips.Count clip(s) · @FormatDuration(project.VideoDuration)
+                            </span>
+                            <span style="color: var(--neutral-foreground-hint); font-size: 0.85rem;">
+                                @project.CreatedAt.ToString("MMM dd")
+                            </span>
+                        </FluentStack>
+
+                        <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px; justify-content: flex-end;">
+                            <FluentButton Appearance="Appearance.Outline" OnClick="@(() => OpenProject(project.Id))">
+                                Open
+                            </FluentButton>
+                            <FluentButton Appearance="Appearance.Outline" OnClick="@((e) => DeleteProject(project.Id, e))">
+                                Delete
+                            </FluentButton>
+                        </FluentStack>
+                    </FluentStack>
+                </FluentCard>
+            }
+        </div>
+    }
+</FluentStack>
+
+@code {
+    private List<VideoProject> projects = new();
+
+    protected override void OnInitialized()
+    {
+        LoadProjects();
+    }
+
+    private void LoadProjects()
+    {
+        projects = ProjectService.GetAllProjects().ToList();
+    }
+
+    private void CreateNewProject()
+    {
+        NavigationManager.NavigateTo("/new-project");
+    }
+
+    private void OpenProject(string id)
+    {
+        NavigationManager.NavigateTo($"/video-analysis/{id}");
+    }
+
+    private void DeleteProject(string id, MouseEventArgs e)
+    {
+        ProjectService.DeleteProject(id);
+        LoadProjects();
+    }
+
+    private Appearance GetStatusAppearance(ProjectStatus status) => status switch
+    {
+        ProjectStatus.Ready => Appearance.Accent,
+        ProjectStatus.Analyzing => Appearance.Neutral,
+        ProjectStatus.Completed => Appearance.Accent,
+        _ => Appearance.Neutral
+    };
+
+    private string GetPlatformEmoji(SocialPlatform platform) => platform switch
+    {
+        SocialPlatform.Facebook => "📘",
+        SocialPlatform.Instagram => "📸",
+        SocialPlatform.YouTube => "▶️",
+        SocialPlatform.TikTok => "🎵",
+        _ => "📱"
+    };
+
+    private string FormatDuration(double seconds)
+    {
+        var ts = TimeSpan.FromSeconds(seconds);
+        return ts.TotalHours >= 1 ? $"{(int)ts.TotalHours}h {ts.Minutes}m" : $"{ts.Minutes}m {ts.Seconds}s";
+    }
+}

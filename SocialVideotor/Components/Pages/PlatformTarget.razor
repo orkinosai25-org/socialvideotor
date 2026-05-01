@@ -1,0 +1,147 @@
+@page "/platform-target/{projectId}"
+@using SocialVideotor.Models
+@using SocialVideotor.Services
+@inject IProjectService ProjectService
+@inject NavigationManager NavigationManager
+@rendermode InteractiveServer
+
+<PageTitle>Platform Settings - SocialVideotor</PageTitle>
+
+@if (project == null)
+{
+    <FluentProgressRing />
+}
+else
+{
+    <FluentStack Orientation="Orientation.Vertical" Style="gap: 24px;">
+        <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="justify-content: space-between;">
+            <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="gap: 12px;">
+                <FluentButton Appearance="Appearance.Outline" OnClick="@GoBack">
+                    <FluentIcon Value="@(new Icons.Regular.Size20.ArrowLeft())" />
+                </FluentButton>
+                <h2 style="margin: 0;">Export Settings - @project.Name</h2>
+            </FluentStack>
+            <FluentButton Appearance="Appearance.Accent" OnClick="@Export">
+                <FluentIcon Value="@(new Icons.Regular.Size20.ArrowDownload())" Slot="start" />
+                Export All Clips
+            </FluentButton>
+        </FluentStack>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px;">
+            @foreach (var platform in Enum.GetValues<SocialPlatform>())
+            {
+                var settings = GetPlatformSettings(platform);
+                var cardStyle = $"padding: 20px; border: 2px solid {(platformEnabled[platform] ? "var(--accent-fill-rest)" : "var(--neutral-stroke-rest)")}";
+                <FluentCard Style="@cardStyle">                    <FluentStack Orientation="Orientation.Vertical" Style="gap: 12px;">
+                        <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="justify-content: space-between;">
+                            <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="gap: 8px;">
+                                <span style="font-size: 1.5rem;">@GetPlatformEmoji(platform)</span>
+                                <h3 style="margin: 0;">@platform</h3>
+                            </FluentStack>
+                            <FluentCheckbox @bind-Value="@platformEnabled[platform]" />
+                        </FluentStack>
+
+                        <FluentStack Orientation="Orientation.Vertical" Style="gap: 4px;">
+                            @foreach (var setting in settings)
+                            {
+                                <FluentStack Orientation="Orientation.Horizontal" Style="justify-content: space-between;">
+                                    <span style="color: var(--neutral-foreground-hint); font-size: 0.85rem;">@setting.Key</span>
+                                    <span style="font-size: 0.85rem; font-weight: 500;">@setting.Value</span>
+                                </FluentStack>
+                            }
+                        </FluentStack>
+
+                        @if (platformEnabled[platform])
+                        {
+                            <div>
+                                <FluentLabel>Aspect Ratio</FluentLabel>
+                                <FluentSelect TOption="string" @bind-Value="@platformRatios[platform]" Style="width: 100%;">
+                                    @foreach (var ratio in GetAspectRatios(platform))
+                                    {
+                                        <FluentOption Value="@ratio">@ratio</FluentOption>
+                                    }
+                                </FluentSelect>
+                            </div>
+                        }
+                    </FluentStack>
+                </FluentCard>
+            }
+        </div>
+
+        @if (exported)
+        {
+            <FluentMessageBar Intent="MessageIntent.Success">
+                ✅ Export settings saved! Your clips are ready for @string.Join(", ", project.TargetPlatforms).
+            </FluentMessageBar>
+        }
+    </FluentStack>
+}
+
+@code {
+    [Parameter] public string ProjectId { get; set; } = string.Empty;
+
+    private VideoProject? project;
+    private Dictionary<SocialPlatform, bool> platformEnabled = new();
+    private Dictionary<SocialPlatform, string> platformRatios = new();
+    private bool exported = false;
+
+    protected override void OnInitialized()
+    {
+        project = ProjectService.GetProject(ProjectId);
+        foreach (var platform in Enum.GetValues<SocialPlatform>())
+        {
+            platformEnabled[platform] = project?.TargetPlatforms.Contains(platform) ?? false;
+            platformRatios[platform] = GetAspectRatios(platform).First();
+        }
+    }
+
+    private void Export()
+    {
+        if (project == null) return;
+        project.TargetPlatforms = platformEnabled.Where(kv => kv.Value).Select(kv => kv.Key).ToList();
+        project.Status = ProjectStatus.Completed;
+        ProjectService.UpdateProject(project);
+        exported = true;
+    }
+
+    private void GoBack() => NavigationManager.NavigateTo($"/clip-editor/{ProjectId}");
+
+    private string GetPlatformEmoji(SocialPlatform platform) => platform switch
+    {
+        SocialPlatform.Facebook => "📘",
+        SocialPlatform.Instagram => "📸",
+        SocialPlatform.YouTube => "▶️",
+        SocialPlatform.TikTok => "🎵",
+        _ => "📱"
+    };
+
+    private List<string> GetAspectRatios(SocialPlatform platform) => platform switch
+    {
+        SocialPlatform.Facebook => new List<string> { "16:9", "1:1", "4:5" },
+        SocialPlatform.Instagram => new List<string> { "9:16", "1:1", "4:5" },
+        SocialPlatform.YouTube => new List<string> { "16:9", "9:16", "1:1" },
+        SocialPlatform.TikTok => new List<string> { "9:16", "1:1" },
+        _ => new List<string> { "16:9" }
+    };
+
+    private Dictionary<string, string> GetPlatformSettings(SocialPlatform platform) => platform switch
+    {
+        SocialPlatform.Facebook => new Dictionary<string, string>
+        {
+            { "Max Length", "240 min" }, { "Best Format", "MP4" }, { "Resolution", "1080p" }
+        },
+        SocialPlatform.Instagram => new Dictionary<string, string>
+        {
+            { "Reels Max", "90 sec" }, { "Best Format", "MP4" }, { "Resolution", "1080p" }
+        },
+        SocialPlatform.YouTube => new Dictionary<string, string>
+        {
+            { "Shorts Max", "60 sec" }, { "Best Format", "MP4" }, { "Resolution", "4K" }
+        },
+        SocialPlatform.TikTok => new Dictionary<string, string>
+        {
+            { "Max Length", "10 min" }, { "Best Format", "MP4" }, { "Resolution", "1080p" }
+        },
+        _ => new Dictionary<string, string>()
+    };
+}

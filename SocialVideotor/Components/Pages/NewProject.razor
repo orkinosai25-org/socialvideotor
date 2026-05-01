@@ -1,0 +1,144 @@
+@page "/new-project"
+@using SocialVideotor.Models
+@using SocialVideotor.Services
+@inject IProjectService ProjectService
+@inject IVideoIndexerService VideoIndexerService
+@inject NavigationManager NavigationManager
+@rendermode InteractiveServer
+
+<PageTitle>New Project - SocialVideotor</PageTitle>
+
+<FluentStack Orientation="Orientation.Vertical" Style="gap: 24px; max-width: 640px; margin: 0 auto;">
+    <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="gap: 12px;">
+        <FluentButton Appearance="Appearance.Outline" OnClick="@GoBack">
+            <FluentIcon Value="@(new Icons.Regular.Size20.ArrowLeft())" />
+        </FluentButton>
+        <h2 style="margin: 0;">Create New Project</h2>
+    </FluentStack>
+
+    <FluentCard Style="padding: 32px; width: 100%;">
+        <FluentStack Orientation="Orientation.Vertical" Style="gap: 20px;">
+            <div>
+                <FluentLabel>Project Name *</FluentLabel>
+                <FluentTextField @bind-Value="projectName" Placeholder="My Awesome Video" Style="width: 100%;" />
+            </div>
+
+            <div>
+                <FluentLabel>Target Platforms</FluentLabel>
+                <FluentStack Orientation="Orientation.Horizontal" Style="gap: 16px; flex-wrap: wrap; margin-top: 8px;">
+                    @foreach (var platform in Enum.GetValues<SocialPlatform>())
+                    {
+                        <FluentCheckbox @bind-Value="@selectedPlatforms[platform]" Label="@($"{GetPlatformEmoji(platform)} {platform}")" />
+                    }
+                </FluentStack>
+            </div>
+
+            <FluentDivider />
+
+            <div>
+                <FluentLabel>Video URL</FluentLabel>
+                <FluentTextField @bind-Value="videoUrl"
+                                Placeholder="https://www.youtube.com/watch?v=..."
+                                Style="width: 100%;" />
+                <p style="color: var(--neutral-foreground-hint); font-size: 0.85rem; margin: 4px 0 0 0;">
+                    Supports YouTube, Vimeo, and direct video URLs
+                </p>
+            </div>
+
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <FluentMessageBar Intent="MessageIntent.Error">@errorMessage</FluentMessageBar>
+            }
+
+            <FluentStack Orientation="Orientation.Horizontal" Style="gap: 12px; justify-content: flex-end;">
+                <FluentButton Appearance="Appearance.Outline" OnClick="@GoBack">Cancel</FluentButton>
+                <FluentButton Appearance="Appearance.Accent" OnClick="@CreateProject" Disabled="@isLoading">
+                    @if (isLoading)
+                    {
+                        <FluentProgressRing Style="width: 16px; height: 16px;" />
+                        <span style="margin-left: 8px;">Analyzing...</span>
+                    }
+                    else
+                    {
+                        <FluentIcon Value="@(new Icons.Regular.Size20.Play())" Slot="start" />
+                        <span>Start Analysis</span>
+                    }
+                </FluentButton>
+            </FluentStack>
+        </FluentStack>
+    </FluentCard>
+</FluentStack>
+
+@code {
+    private string projectName = string.Empty;
+    private string videoUrl = string.Empty;
+    private bool isLoading = false;
+    private string errorMessage = string.Empty;
+    private Dictionary<SocialPlatform, bool> selectedPlatforms = new();
+
+    protected override void OnInitialized()
+    {
+        foreach (var platform in Enum.GetValues<SocialPlatform>())
+        {
+            selectedPlatforms[platform] = platform == SocialPlatform.Instagram || platform == SocialPlatform.TikTok;
+        }
+    }
+
+    private async Task CreateProject()
+    {
+        if (string.IsNullOrWhiteSpace(projectName))
+        {
+            errorMessage = "Please enter a project name";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(videoUrl))
+        {
+            errorMessage = "Please provide a video URL";
+            return;
+        }
+
+        errorMessage = string.Empty;
+        isLoading = true;
+
+        try
+        {
+            var project = ProjectService.CreateProject(projectName, videoUrl);
+            project.TargetPlatforms = selectedPlatforms.Where(kv => kv.Value).Select(kv => kv.Key).ToList();
+            project.Status = ProjectStatus.Analyzing;
+            ProjectService.UpdateProject(project);
+
+            var videoId = await VideoIndexerService.UploadVideoAsync(videoUrl, projectName);
+            project.VideoIndexerId = videoId;
+
+            var analysis = await VideoIndexerService.GetVideoIndexAsync(videoId);
+            project.Transcript = analysis.Transcript;
+            project.VideoDuration = analysis.Duration;
+            project.Status = ProjectStatus.Ready;
+
+            foreach (var clip in analysis.SuggestedClips)
+            {
+                project.Clips.Add(clip);
+            }
+            ProjectService.UpdateProject(project);
+
+            NavigationManager.NavigateTo($"/video-analysis/{project.Id}");
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error creating project: {ex.Message}";
+            isLoading = false;
+        }
+    }
+
+    private void GoBack() => NavigationManager.NavigateTo("/");
+
+    private string GetPlatformEmoji(SocialPlatform platform) => platform switch
+    {
+        SocialPlatform.Facebook => "📘",
+        SocialPlatform.Instagram => "📸",
+        SocialPlatform.YouTube => "▶️",
+        SocialPlatform.TikTok => "🎵",
+        _ => "📱"
+    };
+}
