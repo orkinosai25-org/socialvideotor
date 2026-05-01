@@ -1,0 +1,53 @@
+## .NET / ASP.NET Core
+*.user
+*.suo
+*.cache
+*.pdb
+*.ilk
+*.meta
+*.obj
+*.iobj
+*.pch
+*.ipch
+*.aps
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.swp
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/packages/
+packages/
+nuget.config~
+
+# Publish artifacts
+publish/
+**/publish/
+
+# Secrets
+**/appsettings.Production.json
+**/appsettings.Secrets.json
+
+# Temporary files
+*.tmp
+*.bak
+TestIcons.csx
