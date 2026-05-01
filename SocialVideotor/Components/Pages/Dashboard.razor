@@ -9,9 +9,14 @@
 
 <FluentStack Orientation="Orientation.Vertical" Style="gap: 24px;">
     <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="justify-content: space-between; width: 100%;">
-        <div>
-            <h1 style="margin: 0; font-size: 2rem;">🎬 SocialVideotor</h1>
-            <p style="margin: 4px 0 0 0; color: var(--neutral-foreground-rest);">Create engaging social media video clips with AI</p>
+        <div style="display: flex; align-items: center; gap: 16px;">
+            <img src="logo.svg" alt="SocialVideotor" style="width: 72px; height: auto;" />
+            <div>
+                <h1 style="margin: 0; font-size: 2rem; font-weight: 800;">
+                    <span style="color: var(--brand-indigo);">Social</span><span style="color: var(--brand-violet);">Videotor</span>
+                </h1>
+                <p style="margin: 4px 0 0 0; color: #6B7280; font-size: 0.95rem;">AI-powered social media video clips</p>
+            </div>
         </div>
         <FluentButton Appearance="Appearance.Accent" OnClick="@CreateNewProject">
             <FluentIcon Value="@(new Icons.Regular.Size20.Add())" Slot="start" />

@@ -1,3 +1,45 @@
+.sidebar-brand {
+    display: flex;
+    align-items: center;
+    padding: 16px 12px 12px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 4px;
+}
+
+.sidebar-brand-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+    color: white;
+}
+
+.sidebar-brand-link:hover {
+    opacity: 0.85;
+}
+
+.sidebar-logo {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    flex-shrink: 0;
+}
+
+.sidebar-brand-name {
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    line-height: 1;
+}
+
+.brand-social {
+    color: #ffffff;
+}
+
+.brand-videotor {
+    color: #a78bfa;
+}
+
 .navbar-toggler {
     appearance: none;
     cursor: pointer;
