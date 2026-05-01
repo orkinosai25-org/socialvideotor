@@ -1,0 +1,178 @@
+@page "/generation-suggestions/{projectId}"
+@using SocialVideotor.Models
+@using SocialVideotor.Services
+@inject IProjectService ProjectService
+@inject IVideoAIService VideoAIService
+@inject NavigationManager NavigationManager
+@rendermode InteractiveServer
+
+<PageTitle>AI Suggestions - SocialVideotor</PageTitle>
+
+@if (project == null)
+{
+    <FluentProgressRing />
+}
+else
+{
+    <FluentStack Orientation="Orientation.Vertical" Style="gap: 24px;">
+        <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="justify-content: space-between;">
+            <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="gap: 12px;">
+                <FluentButton Appearance="Appearance.Outline" OnClick="@GoBack">
+                    <FluentIcon Value="@(new Icons.Regular.Size20.ArrowLeft())" />
+                </FluentButton>
+                <div>
+                    <h2 style="margin: 0;">✨ AI Suggestions</h2>
+                    <p style="margin: 4px 0 0 0; color: var(--neutral-foreground-hint); font-size: 0.85rem;">@project.Name</p>
+                </div>
+            </FluentStack>
+            <FluentButton Appearance="Appearance.Accent" OnClick="@GenerateSuggestions" Disabled="@isGenerating">
+                @if (isGenerating)
+                {
+                    <FluentProgressRing Style="width: 16px; height: 16px;" />
+                    <span style="margin-left: 8px;">Generating...</span>
+                }
+                else
+                {
+                    <FluentIcon Value="@(new Icons.Regular.Size20.Sparkle())" Slot="start" />
+                    <span>Generate Suggestions</span>
+                }
+            </FluentButton>
+        </FluentStack>
+
+        @if (isGenerating)
+        {
+            <FluentCard Style="padding: 32px; text-align: center;">
+                <FluentProgressRing />
+                <p style="margin-top: 16px;">GPT-4o is analyzing your video content...</p>
+            </FluentCard>
+        }
+        else if (!suggestions.Any())
+        {
+            <FluentCard Style="padding: 48px; text-align: center;">
+                <FluentIcon Value="@(new Icons.Regular.Size48.Sparkle())" Style="color: var(--accent-fill-rest);" />
+                <h3>Get AI-powered suggestions</h3>
+                <p style="color: var(--neutral-foreground-hint);">Click "Generate Suggestions" to get clip recommendations from GPT-4o</p>
+            </FluentCard>
+        }
+        else
+        {
+            <FluentStack Orientation="Orientation.Vertical" Style="gap: 16px;">
+                @foreach (var suggestion in suggestions)
+                {
+                    <FluentCard Style="padding: 20px;">
+                        <FluentStack Orientation="Orientation.Vertical" Style="gap: 12px;">
+                            <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="justify-content: space-between;">
+                                <h3 style="margin: 0;">@suggestion.Title</h3>
+                                <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px;">
+                                    <FluentBadge Appearance="Appearance.Accent">
+                                        Score: @suggestion.EngagementScore.ToString("P0")
+                                    </FluentBadge>
+                                    <FluentButton Appearance="Appearance.Outline" OnClick="@(() => ApplySuggestion(suggestion))">
+                                        Apply
+                                    </FluentButton>
+                                </FluentStack>
+                            </FluentStack>
+
+                            <p style="margin: 0; color: var(--neutral-foreground-hint);">@suggestion.Description</p>
+
+                            <FluentStack Orientation="Orientation.Horizontal" Style="gap: 16px;">
+                                <span style="font-size: 0.85rem;">
+                                    ⏱️ @FormatTime(suggestion.StartTime) - @FormatTime(suggestion.EndTime)
+                                    (@FormatDuration(suggestion.EndTime - suggestion.StartTime))
+                                </span>
+                            </FluentStack>
+
+                            @if (!string.IsNullOrEmpty(suggestion.SuggestedCaption))
+                            {
+                                <div style="background: var(--neutral-fill-rest); padding: 12px; border-radius: 6px;">
+                                    <FluentLabel>Suggested Caption</FluentLabel>
+                                    <p style="margin: 4px 0 0 0; font-style: italic;">@suggestion.SuggestedCaption</p>
+                                </div>
+                            }
+
+                            <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px; flex-wrap: wrap;">
+                                @foreach (var tag in suggestion.Hashtags)
+                                {
+                                    <FluentBadge>#@tag</FluentBadge>
+                                }
+                            </FluentStack>
+
+                            <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px; flex-wrap: wrap;">
+                                @foreach (var platform in suggestion.RecommendedPlatforms)
+                                {
+                                    <FluentBadge>@GetPlatformEmoji(platform) @platform</FluentBadge>
+                                }
+                            </FluentStack>
+                        </FluentStack>
+                    </FluentCard>
+                }
+            </FluentStack>
+        }
+    </FluentStack>
+}
+
+@code {
+    [Parameter] public string ProjectId { get; set; } = string.Empty;
+
+    private VideoProject? project;
+    private List<GenerationSuggestion> suggestions = new();
+    private bool isGenerating = false;
+
+    protected override void OnInitialized()
+    {
+        project = ProjectService.GetProject(ProjectId);
+    }
+
+    private async Task GenerateSuggestions()
+    {
+        if (project == null) return;
+        isGenerating = true;
+        StateHasChanged();
+
+        suggestions = await VideoAIService.GenerateSuggestionsAsync(
+            project.Transcript,
+            project.TargetPlatforms
+        );
+
+        isGenerating = false;
+        StateHasChanged();
+    }
+
+    private void ApplySuggestion(GenerationSuggestion suggestion)
+    {
+        if (project == null) return;
+        var clip = new VideoClip
+        {
+            Title = suggestion.Title,
+            StartTime = suggestion.StartTime,
+            EndTime = suggestion.EndTime,
+            Description = suggestion.Description,
+            IsSelected = true
+        };
+        ProjectService.AddClipToProject(project.Id, clip);
+        NavigationManager.NavigateTo($"/video-analysis/{ProjectId}");
+    }
+
+    private void GoBack() => NavigationManager.NavigateTo($"/video-analysis/{ProjectId}");
+
+    private string GetPlatformEmoji(SocialPlatform platform) => platform switch
+    {
+        SocialPlatform.Facebook => "📘",
+        SocialPlatform.Instagram => "📸",
+        SocialPlatform.YouTube => "▶️",
+        SocialPlatform.TikTok => "🎵",
+        _ => "📱"
+    };
+
+    private string FormatTime(double seconds)
+    {
+        var ts = TimeSpan.FromSeconds(seconds);
+        return ts.ToString(@"m\:ss");
+    }
+
+    private string FormatDuration(double seconds)
+    {
+        var ts = TimeSpan.FromSeconds(seconds);
+        return ts.TotalMinutes >= 1 ? $"{(int)ts.TotalMinutes}m {ts.Seconds}s" : $"{ts.Seconds}s";
+    }
+}

@@ -1,0 +1,80 @@
+@using SocialVideotor.Models
+
+<FluentCard Style="padding: 16px; border-left: 4px solid var(--accent-fill-rest);">
+    <FluentStack Orientation="Orientation.Vertical" Style="gap: 12px;">
+        <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="justify-content: space-between;">
+            <FluentLabel>Text Tile</FluentLabel>
+            <FluentButton Appearance="Appearance.Stealth" OnClick="@Remove" title="Remove">
+                <FluentIcon Value="@(new Icons.Regular.Size20.Delete())" />
+            </FluentButton>
+        </FluentStack>
+
+        <div>
+            <FluentLabel>Text / Message</FluentLabel>
+            <FluentTextField @bind-Value="Tile.Text" Placeholder="Enter your message or slogan" Style="width: 100%;" @oninput="@OnChanged" />
+        </div>
+
+        <FluentStack Orientation="Orientation.Horizontal" Style="gap: 12px;">
+            <div style="flex: 1;">
+                <FluentLabel>Position</FluentLabel>
+                <FluentSelect TOption="string" @bind-Value="Tile.Position" Style="width: 100%;">
+                    <FluentOption Value="top">Top</FluentOption>
+                    <FluentOption Value="center">Center</FluentOption>
+                    <FluentOption Value="bottom">Bottom</FluentOption>
+                </FluentSelect>
+            </div>
+            <div style="flex: 1;">
+                <FluentLabel>Font Size</FluentLabel>
+                <FluentNumberField TValue="int" @bind-Value="Tile.FontSize" Min="12" Max="72" Style="width: 100%;" />
+            </div>
+        </FluentStack>
+
+        <FluentStack Orientation="Orientation.Horizontal" Style="gap: 12px;">
+            <div style="flex: 1;">
+                <FluentLabel>Text Color</FluentLabel>
+                <input type="color" value="@Tile.Color" @onchange="@(e => Tile.Color = e.Value?.ToString() ?? "#FFFFFF")"
+                       style="width: 100%; height: 36px; border: 1px solid var(--neutral-stroke-rest); border-radius: 4px; padding: 2px;" />
+            </div>
+            <div style="flex: 1;">
+                <FluentLabel>Background</FluentLabel>
+                <input type="color" value="@Tile.BackgroundColor" @onchange="@(e => Tile.BackgroundColor = e.Value?.ToString() ?? "#000000")"
+                       style="width: 100%; height: 36px; border: 1px solid var(--neutral-stroke-rest); border-radius: 4px; padding: 2px;" />
+            </div>
+        </FluentStack>
+
+        <FluentStack Orientation="Orientation.Horizontal" Style="gap: 12px;">
+            <div style="flex: 1;">
+                <FluentLabel>Start (sec)</FluentLabel>
+                <FluentNumberField TValue="double" @bind-Value="Tile.StartTime" Min="0" Style="width: 100%;" />
+            </div>
+            <div style="flex: 1;">
+                <FluentLabel>End (sec)</FluentLabel>
+                <FluentNumberField TValue="double" @bind-Value="Tile.EndTime" Min="0" Style="width: 100%;" />
+            </div>
+        </FluentStack>
+
+        <div style="background: #000; padding: 16px; border-radius: 6px; text-align: @GetTextAlign(); position: relative; min-height: 60px; display: flex; align-items: @GetFlexAlign();">
+            <span style="color: @Tile.Color; background: @Tile.BackgroundColor; font-size: @(Tile.FontSize)px; padding: 4px 8px; border-radius: 4px;">
+                @(string.IsNullOrEmpty(Tile.Text) ? "Preview text" : Tile.Text)
+            </span>
+        </div>
+    </FluentStack>
+</FluentCard>
+
+@code {
+    [Parameter] public TextTile Tile { get; set; } = new();
+    [Parameter] public EventCallback<TextTile> OnTileChanged { get; set; }
+    [Parameter] public EventCallback<TextTile> OnTileRemoved { get; set; }
+
+    private async Task OnChanged() => await OnTileChanged.InvokeAsync(Tile);
+    private async Task Remove() => await OnTileRemoved.InvokeAsync(Tile);
+
+    private string GetTextAlign() => Tile.Position == "center" ? "center" : Tile.Position == "right" ? "right" : "left";
+    private string GetFlexAlign() => Tile.Position switch
+    {
+        "top" => "flex-start",
+        "center" => "center",
+        "bottom" => "flex-end",
+        _ => "flex-end"
+    };
+}

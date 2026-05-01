@@ -1,0 +1,186 @@
+@page "/video-analysis/{projectId}"
+@using SocialVideotor.Models
+@using SocialVideotor.Services
+@inject IProjectService ProjectService
+@inject NavigationManager NavigationManager
+@rendermode InteractiveServer
+
+<PageTitle>Video Analysis - SocialVideotor</PageTitle>
+
+@if (project == null)
+{
+    <FluentProgressRing />
+}
+else
+{
+    <FluentStack Orientation="Orientation.Vertical" Style="gap: 24px;">
+        <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="justify-content: space-between;">
+            <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="gap: 12px;">
+                <FluentButton Appearance="Appearance.Outline" OnClick="@GoBack">
+                    <FluentIcon Value="@(new Icons.Regular.Size20.ArrowLeft())" />
+                </FluentButton>
+                <div>
+                    <h2 style="margin: 0;">@project.Name</h2>
+                    <p style="margin: 4px 0 0 0; color: var(--neutral-foreground-hint); font-size: 0.85rem;">@project.VideoUrl</p>
+                </div>
+            </FluentStack>
+            <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px;">
+                <FluentButton Appearance="Appearance.Outline" OnClick="@GoToSuggestions">
+                    <FluentIcon Value="@(new Icons.Regular.Size20.Sparkle())" Slot="start" />
+                    AI Suggestions
+                </FluentButton>
+                <FluentButton Appearance="Appearance.Accent" OnClick="@GoToEditor" Disabled="@(!project.Clips.Any(c => c.IsSelected))">
+                    <FluentIcon Value="@(new Icons.Regular.Size20.Edit())" Slot="start" />
+                    Edit Selected Clips
+                </FluentButton>
+            </FluentStack>
+        </FluentStack>
+
+        <FluentStack Orientation="Orientation.Horizontal" Style="gap: 24px;" VerticalAlignment="VerticalAlignment.Top">
+            <FluentCard Style="padding: 20px; flex: 1;">
+                <FluentStack Orientation="Orientation.Vertical" Style="gap: 12px;">
+                    <h3 style="margin: 0;">📹 Video Info</h3>
+                    <div>
+                        <FluentLabel>Duration</FluentLabel>
+                        <p style="margin: 4px 0;">@FormatDuration(project.VideoDuration)</p>
+                    </div>
+                    <div>
+                        <FluentLabel>Platforms</FluentLabel>
+                        <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px; margin-top: 4px; flex-wrap: wrap;">
+                            @foreach (var platform in project.TargetPlatforms)
+                            {
+                                <FluentBadge Appearance="Appearance.Accent">@GetPlatformEmoji(platform) @platform</FluentBadge>
+                            }
+                        </FluentStack>
+                    </div>
+                    <div>
+                        <FluentLabel>Status</FluentLabel>
+                        <FluentBadge Appearance="Appearance.Accent" Style="margin-top: 4px;">@project.Status</FluentBadge>
+                    </div>
+                </FluentStack>
+            </FluentCard>
+
+            @if (!string.IsNullOrEmpty(project.Transcript))
+            {
+                <FluentCard Style="padding: 20px; flex: 2;">
+                    <h3 style="margin: 0 0 12px 0;">📝 Transcript</h3>
+                    <p style="color: var(--neutral-foreground-rest); line-height: 1.6; max-height: 150px; overflow-y: auto; margin: 0;">
+                        @project.Transcript
+                    </p>
+                </FluentCard>
+            }
+        </FluentStack>
+
+        <FluentCard Style="padding: 20px;">
+            <FluentStack Orientation="Orientation.Vertical" Style="gap: 16px;">
+                <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="justify-content: space-between;">
+                    <h3 style="margin: 0;">🎬 Suggested Clips (@project.Clips.Count)</h3>
+                    <FluentButton Appearance="Appearance.Outline" OnClick="@AddNewClip">
+                        <FluentIcon Value="@(new Icons.Regular.Size20.Add())" Slot="start" />
+                        Add Clip
+                    </FluentButton>
+                </FluentStack>
+
+                @if (!project.Clips.Any())
+                {
+                    <div style="text-align: center; padding: 32px; color: var(--neutral-foreground-hint);">
+                        No clips yet. Add clips manually or use AI Suggestions.
+                    </div>
+                }
+                else
+                {
+                    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;">
+                        @foreach (var clip in project.Clips)
+                        {
+                            <div style="border: 2px solid @(clip.IsSelected ? "var(--accent-fill-rest)" : "var(--neutral-stroke-rest)"); border-radius: 8px; padding: 16px; cursor: pointer; transition: all 0.2s;"
+                                 @onclick="@(() => ToggleClipSelection(clip))">
+                                <FluentStack Orientation="Orientation.Vertical" Style="gap: 8px;">
+                                    <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="justify-content: space-between;">
+                                        <span style="font-weight: 600;">@clip.Title</span>
+                                        @if (clip.IsSelected)
+                                        {
+                                            <FluentBadge Appearance="Appearance.Accent">✓ Selected</FluentBadge>
+                                        }
+                                    </FluentStack>
+                                    <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px;">
+                                        <span style="font-size: 0.85rem; color: var(--neutral-foreground-hint);">
+                                            @FormatTime(clip.StartTime) - @FormatTime(clip.EndTime)
+                                        </span>
+                                        <span style="font-size: 0.85rem; color: var(--neutral-foreground-hint);">
+                                            (@FormatDuration(clip.Duration))
+                                        </span>
+                                    </FluentStack>
+                                    @if (!string.IsNullOrEmpty(clip.Description))
+                                    {
+                                        <p style="margin: 0; font-size: 0.85rem; color: var(--neutral-foreground-hint);">@clip.Description</p>
+                                    }
+                                    <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px;">
+                                        <FluentBadge>@clip.TextTiles.Count tile(s)</FluentBadge>
+                                    </FluentStack>
+                                </FluentStack>
+                            </div>
+                        }
+                    </div>
+                }
+            </FluentStack>
+        </FluentCard>
+    </FluentStack>
+}
+
+@code {
+    [Parameter] public string ProjectId { get; set; } = string.Empty;
+
+    private VideoProject? project;
+
+    protected override void OnInitialized()
+    {
+        project = ProjectService.GetProject(ProjectId);
+    }
+
+    private void ToggleClipSelection(VideoClip clip)
+    {
+        clip.IsSelected = !clip.IsSelected;
+        if (project != null) ProjectService.UpdateProject(project);
+        StateHasChanged();
+    }
+
+    private void AddNewClip()
+    {
+        if (project == null) return;
+        var newClip = new VideoClip
+        {
+            Title = $"Clip {project.Clips.Count + 1}",
+            StartTime = 0,
+            EndTime = 30,
+            Description = "Custom clip"
+        };
+        ProjectService.AddClipToProject(project.Id, newClip);
+        project = ProjectService.GetProject(ProjectId);
+        StateHasChanged();
+    }
+
+    private void GoBack() => NavigationManager.NavigateTo("/");
+    private void GoToEditor() => NavigationManager.NavigateTo($"/clip-editor/{ProjectId}");
+    private void GoToSuggestions() => NavigationManager.NavigateTo($"/generation-suggestions/{ProjectId}");
+
+    private string GetPlatformEmoji(SocialPlatform platform) => platform switch
+    {
+        SocialPlatform.Facebook => "📘",
+        SocialPlatform.Instagram => "📸",
+        SocialPlatform.YouTube => "▶️",
+        SocialPlatform.TikTok => "🎵",
+        _ => "📱"
+    };
+
+    private string FormatDuration(double seconds)
+    {
+        var ts = TimeSpan.FromSeconds(seconds);
+        return ts.TotalMinutes >= 1 ? $"{(int)ts.TotalMinutes}m {ts.Seconds}s" : $"{ts.Seconds}s";
+    }
+
+    private string FormatTime(double seconds)
+    {
+        var ts = TimeSpan.FromSeconds(seconds);
+        return ts.ToString(@"m\:ss");
+    }
+}

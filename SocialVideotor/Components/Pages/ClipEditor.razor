@@ -1,0 +1,178 @@
+@page "/clip-editor/{projectId}"
+@using SocialVideotor.Models
+@using SocialVideotor.Services
+@inject IProjectService ProjectService
+@inject NavigationManager NavigationManager
+@rendermode InteractiveServer
+
+<PageTitle>Clip Editor - SocialVideotor</PageTitle>
+
+@if (project == null)
+{
+    <FluentProgressRing />
+}
+else
+{
+    <FluentStack Orientation="Orientation.Vertical" Style="gap: 24px;">
+        <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="justify-content: space-between;">
+            <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="gap: 12px;">
+                <FluentButton Appearance="Appearance.Outline" OnClick="@GoBack">
+                    <FluentIcon Value="@(new Icons.Regular.Size20.ArrowLeft())" />
+                </FluentButton>
+                <h2 style="margin: 0;">Clip Editor - @project.Name</h2>
+            </FluentStack>
+            <FluentButton Appearance="Appearance.Accent" OnClick="@GoToPlatform">
+                <FluentIcon Value="@(new Icons.Regular.Size20.Share())" Slot="start" />
+                Export Settings
+            </FluentButton>
+        </FluentStack>
+
+        <FluentStack Orientation="Orientation.Horizontal" Style="gap: 24px;" VerticalAlignment="VerticalAlignment.Top">
+            <div style="width: 280px; flex-shrink: 0;">
+                <FluentCard Style="padding: 16px;">
+                    <h3 style="margin: 0 0 16px 0;">Clips</h3>
+                    <FluentStack Orientation="Orientation.Vertical" Style="gap: 8px;">
+                        @foreach (var clip in selectedClips)
+                        {
+                            <div style="padding: 12px; border-radius: 6px; cursor: pointer; background: @(selectedClip?.Id == clip.Id ? "var(--accent-fill-rest)" : "var(--neutral-fill-rest)"); color: @(selectedClip?.Id == clip.Id ? "white" : "inherit");"
+                                 @onclick="@(() => SelectClip(clip))">
+                                <div style="font-weight: 600; font-size: 0.9rem;">@clip.Title</div>
+                                <div style="font-size: 0.8rem; opacity: 0.8;">@FormatTime(clip.StartTime) - @FormatTime(clip.EndTime)</div>
+                            </div>
+                        }
+                    </FluentStack>
+                </FluentCard>
+            </div>
+
+            @if (selectedClip != null)
+            {
+                <FluentStack Orientation="Orientation.Vertical" Style="gap: 16px; flex: 1;">
+                    <FluentCard Style="padding: 20px;">
+                        <FluentTabs>
+                            <FluentTab Label="Clip Settings">
+                                <FluentStack Orientation="Orientation.Vertical" Style="gap: 16px; padding-top: 16px;">
+                                    <div>
+                                        <FluentLabel>Clip Title</FluentLabel>
+                                        <FluentTextField @bind-Value="selectedClip.Title" Style="width: 100%;" />
+                                    </div>
+                                    <FluentStack Orientation="Orientation.Horizontal" Style="gap: 16px;">
+                                        <div style="flex: 1;">
+                                            <FluentLabel>Start Time (seconds)</FluentLabel>
+                                            <FluentNumberField TValue="double" @bind-Value="selectedClip.StartTime" Min="0" Style="width: 100%;" />
+                                        </div>
+                                        <div style="flex: 1;">
+                                            <FluentLabel>End Time (seconds)</FluentLabel>
+                                            <FluentNumberField TValue="double" @bind-Value="selectedClip.EndTime" Min="0" Style="width: 100%;" />
+                                        </div>
+                                    </FluentStack>
+                                    <div>
+                                        <FluentLabel>Description</FluentLabel>
+                                        <FluentTextArea @bind-Value="selectedClip.Description" Style="width: 100%;" Rows="3" />
+                                    </div>
+                                    <FluentButton Appearance="Appearance.Accent" OnClick="@SaveClip">Save Changes</FluentButton>
+                                </FluentStack>
+                            </FluentTab>
+                            <FluentTab Label="Text Tiles">
+                                <FluentStack Orientation="Orientation.Vertical" Style="gap: 16px; padding-top: 16px;">
+                                    <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="justify-content: space-between;">
+                                        <h4 style="margin: 0;">Text Overlays (@selectedClip.TextTiles.Count)</h4>
+                                        <FluentButton Appearance="Appearance.Accent" OnClick="@AddTextTile">
+                                            <FluentIcon Value="@(new Icons.Regular.Size20.Add())" Slot="start" />
+                                            Add Tile
+                                        </FluentButton>
+                                    </FluentStack>
+
+                                    @foreach (var tile in selectedClip.TextTiles)
+                                    {
+                                        <TextTileEditor Tile="@tile" OnTileChanged="@(t => UpdateTile(t))" OnTileRemoved="@(t => RemoveTile(t))" />
+                                    }
+
+                                    @if (!selectedClip.TextTiles.Any())
+                                    {
+                                        <div style="text-align: center; padding: 24px; color: var(--neutral-foreground-hint);">
+                                            No text tiles yet. Add a text overlay to your clip.
+                                        </div>
+                                    }
+                                </FluentStack>
+                            </FluentTab>
+                        </FluentTabs>
+                    </FluentCard>
+
+                    <FluentCard Style="padding: 20px;">
+                        <h3 style="margin: 0 0 16px 0;">Preview</h3>
+                        <ClipPreview Clip="@selectedClip" />
+                    </FluentCard>
+                </FluentStack>
+            }
+            else
+            {
+                <div style="flex: 1; display: flex; align-items: center; justify-content: center; color: var(--neutral-foreground-hint);">
+                    Select a clip from the left to edit
+                </div>
+            }
+        </FluentStack>
+    </FluentStack>
+}
+
+@code {
+    [Parameter] public string ProjectId { get; set; } = string.Empty;
+
+    private VideoProject? project;
+    private List<VideoClip> selectedClips = new();
+    private VideoClip? selectedClip;
+
+    protected override void OnInitialized()
+    {
+        project = ProjectService.GetProject(ProjectId);
+        if (project != null)
+        {
+            selectedClips = project.Clips.Where(c => c.IsSelected).ToList();
+            if (!selectedClips.Any()) selectedClips = project.Clips.ToList();
+            selectedClip = selectedClips.FirstOrDefault();
+        }
+    }
+
+    private void SelectClip(VideoClip clip) => selectedClip = clip;
+
+    private void AddTextTile()
+    {
+        if (selectedClip == null) return;
+        selectedClip.TextTiles.Add(new TextTile
+        {
+            Text = "Your message here",
+            Position = "bottom",
+            StartTime = selectedClip.StartTime,
+            EndTime = selectedClip.EndTime
+        });
+        StateHasChanged();
+    }
+
+    private void UpdateTile(TextTile tile)
+    {
+        if (selectedClip == null) return;
+        var index = selectedClip.TextTiles.FindIndex(t => t.Id == tile.Id);
+        if (index >= 0) selectedClip.TextTiles[index] = tile;
+        StateHasChanged();
+    }
+
+    private void RemoveTile(TextTile tile)
+    {
+        selectedClip?.TextTiles.RemoveAll(t => t.Id == tile.Id);
+        StateHasChanged();
+    }
+
+    private void SaveClip()
+    {
+        if (project == null || selectedClip == null) return;
+        ProjectService.UpdateClip(project.Id, selectedClip);
+    }
+
+    private void GoBack() => NavigationManager.NavigateTo($"/video-analysis/{ProjectId}");
+    private void GoToPlatform() => NavigationManager.NavigateTo($"/platform-target/{ProjectId}");
+
+    private string FormatTime(double seconds)
+    {
+        var ts = TimeSpan.FromSeconds(seconds);
+        return ts.ToString(@"m\:ss");
+    }
+}

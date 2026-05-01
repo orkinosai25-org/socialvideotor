@@ -1,0 +1,53 @@
+@using SocialVideotor.Models
+
+<div style="background: #000; border-radius: 8px; aspect-ratio: 16/9; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center;">
+    @if (Clip != null)
+    {
+        <div style="color: #fff; text-align: center;">
+            <FluentIcon Value="@(new Icons.Regular.Size48.Play())" Style="color: white; opacity: 0.7;" />
+            <p style="margin: 8px 0 0 0; font-size: 0.85rem; opacity: 0.8;">
+                @FormatTime(Clip.StartTime) - @FormatTime(Clip.EndTime)
+            </p>
+        </div>
+
+        @foreach (var tile in Clip.TextTiles)
+        {
+            <div style="position: absolute; @GetTilePosition(tile); left: 0; right: 0; text-align: center; padding: 8px;">
+                <span style="color: @tile.Color; background: @tile.BackgroundColor; font-size: @(tile.FontSize * 0.5)px; padding: 2px 8px; border-radius: 4px;">
+                    @tile.Text
+                </span>
+            </div>
+        }
+    }
+</div>
+
+@if (Clip != null && Clip.TextTiles.Any())
+{
+    <div style="margin-top: 8px;">
+        <FluentLabel>Text Overlays: @Clip.TextTiles.Count</FluentLabel>
+        <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px; flex-wrap: wrap; margin-top: 4px;">
+            @foreach (var tile in Clip.TextTiles)
+            {
+                <FluentBadge>@tile.Position: @(tile.Text.Length > 20 ? tile.Text[..20] + "..." : tile.Text)</FluentBadge>
+            }
+        </FluentStack>
+    </div>
+}
+
+@code {
+    [Parameter] public VideoClip? Clip { get; set; }
+
+    private string GetTilePosition(TextTile tile) => tile.Position switch
+    {
+        "top" => "top: 8px;",
+        "center" => "top: 50%; transform: translateY(-50%);",
+        "bottom" => "bottom: 8px;",
+        _ => "bottom: 8px;"
+    };
+
+    private string FormatTime(double seconds)
+    {
+        var ts = TimeSpan.FromSeconds(seconds);
+        return ts.ToString(@"m\:ss");
+    }
+}

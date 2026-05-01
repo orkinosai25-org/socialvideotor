@@ -1,0 +1,20 @@
+@using SocialVideotor.Models
+
+<FluentBadge Appearance="@BadgeAppearance" Style="@Style">
+    @GetPlatformEmoji(Platform) @Platform
+</FluentBadge>
+
+@code {
+    [Parameter] public SocialPlatform Platform { get; set; }
+    [Parameter] public Appearance BadgeAppearance { get; set; } = Appearance.Neutral;
+    [Parameter] public string Style { get; set; } = string.Empty;
+
+    private string GetPlatformEmoji(SocialPlatform platform) => platform switch
+    {
+        SocialPlatform.Facebook => "📘",
+        SocialPlatform.Instagram => "📸",
+        SocialPlatform.YouTube => "▶️",
+        SocialPlatform.TikTok => "🎵",
+        _ => "📱"
+    };
+}
