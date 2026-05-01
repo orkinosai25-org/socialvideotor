@@ -8,6 +8,33 @@ main {
     flex: 1;
 }
 
+.top-row-brand {
+    font-weight: 800;
+    font-size: 1rem;
+    letter-spacing: -0.3px;
+    margin-right: 0.75rem;
+}
+
+.top-brand-social {
+    color: var(--brand-indigo);
+}
+
+.top-brand-videotor {
+    color: var(--brand-violet);
+}
+
+.top-row-tagline {
+    font-size: 0.8rem;
+    color: #6B7280;
+    white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+    .top-row-tagline {
+        display: none;
+    }
+}
+
 .sidebar {
     background-image: linear-gradient(180deg, rgb(5, 39, 103) 0%, #3a0647 70%);
 }
