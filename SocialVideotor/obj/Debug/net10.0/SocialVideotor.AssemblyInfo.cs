@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SocialVideotor")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+6c8d47e3ac5cc9eb2ab241f3db8e12cbf7f1c514")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+96dd87ce5454a53ed5b2da68e70a47e8abe54051")]
 [assembly: System.Reflection.AssemblyProductAttribute("SocialVideotor")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SocialVideotor")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
