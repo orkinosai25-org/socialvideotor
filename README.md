@@ -5,12 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="SocialVideotor/wwwroot/logo.svg" alt="SocialVideotor logo" width="120"/>
-</p>
-
-<p align="center">
-  <strong>AI-powered social media video clips</strong><br/>
-  Create engaging clips from your videos — optimised for every major social platform.
+  <img src="SocialVideotor/wwwroot/logo.svg" alt="SocialVideotor logo" width="220"/>
 </p>
 
 ---
