@@ -110,10 +110,21 @@
                             (source: @FormatDuration(currentJob.VideoDuration))
                         </span>
                     </h3>
-                    <FluentButton Appearance="Appearance.Outline" OnClick="@Reset">
-                        <FluentIcon Value="@(new Icons.Regular.Size20.ArrowCounterclockwise())" Slot="start" />
-                        Upload Another
-                    </FluentButton>
+                    <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px;">
+                        <span style="font-size: 0.8rem; color: var(--neutral-foreground-hint); align-self: center;"
+                              aria-label="Auto-deletion time">
+                            <FluentIcon Value="@(new Icons.Regular.Size16.Timer())" />
+                            Auto-deletes @currentJob.ExpiresAt.ToLocalTime().ToString("MMM d, h:mm tt")
+                        </span>
+                        <FluentButton Appearance="Appearance.Outline" OnClick="@DeleteJob">
+                            <FluentIcon Value="@(new Icons.Regular.Size20.Delete())" Slot="start" />
+                            Delete
+                        </FluentButton>
+                        <FluentButton Appearance="Appearance.Outline" OnClick="@Reset">
+                            <FluentIcon Value="@(new Icons.Regular.Size20.ArrowCounterclockwise())" Slot="start" />
+                            Upload Another
+                        </FluentButton>
+                    </FluentStack>
                 </FluentStack>
 
                 <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px;">
@@ -262,6 +273,13 @@
         currentJob = null;
         errorMessage = string.Empty;
         phase = Phase.Idle;
+    }
+
+    private void DeleteJob()
+    {
+        if (currentJob == null) return;
+        RawClipService.DeleteJob(currentJob.Id);
+        Reset();
     }
 
     private void GoBack() => NavigationManager.NavigateTo("/");

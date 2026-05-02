@@ -4,16 +4,25 @@ using SocialVideotor.Models;
 
 namespace SocialVideotor.Services;
 
-public class RawClipService : IRawClipService
+public class RawClipService : IRawClipService, IDisposable
 {
     private readonly IWebHostEnvironment _env;
     private readonly ILogger<RawClipService> _logger;
     private readonly Dictionary<string, RawClipJob> _jobs = new();
+    private readonly Timer _cleanupTimer;
+
+    /// <summary>
+    /// Files are stored outside wwwroot in a non-public directory and served
+    /// only through the controlled /api/clips/{jobId}/{filename} endpoint.
+    /// </summary>
+    private string DataRoot => Path.Combine(_env.ContentRootPath, "data", "uploads");
 
     public RawClipService(IWebHostEnvironment env, ILogger<RawClipService> logger)
     {
         _env = env;
         _logger = logger;
+        // Sweep expired jobs immediately on startup, then every hour
+        _cleanupTimer = new Timer(_ => CleanupExpiredJobs(), null, TimeSpan.Zero, TimeSpan.FromHours(1));
     }
 
     public async Task<RawClipJob> StartProcessingAsync(Stream videoStream, string filename, long fileSize, CancellationToken cancellationToken = default)
@@ -48,6 +57,29 @@ public class RawClipService : IRawClipService
             return _jobs.Values.ToList();
     }
 
+    public void DeleteJob(string jobId)
+    {
+        string? dir = null;
+        lock (_jobs)
+        {
+            if (_jobs.Remove(jobId))
+                dir = GetJobDirectory(jobId);
+        }
+
+        if (dir == null) return; // already deleted or unknown
+        try
+        {
+            if (Directory.Exists(dir))
+                Directory.Delete(dir, recursive: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not delete files for job {JobId}", jobId);
+        }
+    }
+
+    public void Dispose() => _cleanupTimer.Dispose();
+
     // -----------------------------------------------------------------------
     // Private helpers
     // -----------------------------------------------------------------------
@@ -61,7 +93,6 @@ public class RawClipService : IRawClipService
             var sourcePath = Path.Combine(jobDir, "source.mp4");
 
             // 1. Save uploaded file (honours caller's CancellationToken)
-            var sourceUrl = $"/uploads/{job.Id}/source.mp4";
             await SaveFileAsync(job, videoStream, sourcePath, fileSize, cancellationToken);
 
             // 2. Get video duration
@@ -92,7 +123,10 @@ public class RawClipService : IRawClipService
                 var endTime = Math.Min(startTime + clipDuration, duration);
                 var clipFilename = $"clip-{i + 1}.mp4";
                 var clipPath = Path.Combine(jobDir, clipFilename);
-                var clipUrl = $"/uploads/{job.Id}/{clipFilename}";
+
+                // Clips are served via the controlled download endpoint (not wwwroot)
+                var clipApiUrl = $"/api/clips/{job.Id}/{clipFilename}";
+                var sourceApiUrl = $"/api/clips/{job.Id}/source.mp4";
 
                 UpdateJob(job, j =>
                 {
@@ -111,8 +145,8 @@ public class RawClipService : IRawClipService
                     EndTime = endTime,
                     // When FFmpeg is available point to the real clip; otherwise use
                     // the source video with a time fragment for in-browser preview.
-                    PreviewUrl = extracted ? clipUrl : $"{sourceUrl}#t={startTime:F0},{endTime:F0}",
-                    DownloadUrl = extracted ? clipUrl : sourceUrl
+                    PreviewUrl = extracted ? clipApiUrl : $"{sourceApiUrl}#t={startTime:F0},{endTime:F0}",
+                    DownloadUrl = extracted ? clipApiUrl : sourceApiUrl
                 });
             }
 
@@ -247,8 +281,29 @@ public class RawClipService : IRawClipService
         }
     }
 
-    private string GetJobDirectory(string jobId) =>
-        Path.Combine(_env.WebRootPath, "uploads", jobId);
+    private void CleanupExpiredJobs()
+    {
+        List<string> expired;
+        lock (_jobs)
+            expired = _jobs.Values
+                .Where(j => j.ExpiresAt <= DateTime.UtcNow)
+                .Select(j => j.Id)
+                .ToList();
+
+        foreach (var id in expired)
+        {
+            _logger.LogInformation("Auto-deleting expired clip job {JobId}", id);
+            DeleteJob(id);
+        }
+    }
+
+    private string GetJobDirectory(string jobId)
+    {
+        // Defence-in-depth: only allow well-formed GUIDs as directory names
+        if (!Guid.TryParse(jobId, out _))
+            throw new ArgumentException("Invalid job ID format.", nameof(jobId));
+        return Path.Combine(DataRoot, jobId);
+    }
 
     private static void UpdateJob(RawClipJob job, Action<RawClipJob> update)
     {

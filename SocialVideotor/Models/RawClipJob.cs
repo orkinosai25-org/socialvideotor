@@ -9,6 +9,8 @@ public class RawClipJob
     public int ProgressPercent { get; set; }
     public List<RawClip> Clips { get; set; } = new();
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    /// <summary>Clips and job data are automatically deleted after this time (24 h from creation).</summary>
+    public DateTime ExpiresAt { get; set; } = DateTime.UtcNow.AddHours(24);
     public string ErrorMessage { get; set; } = string.Empty;
     public double VideoDuration { get; set; }
     public bool FfmpegAvailable { get; set; }
