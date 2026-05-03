@@ -1,0 +1,313 @@
+@page "/upload-video"
+@using SocialVideotor.Models
+@using SocialVideotor.Services
+@inject IRawClipService RawClipService
+@inject NavigationManager NavigationManager
+@rendermode InteractiveServer
+@implements IDisposable
+
+<PageTitle>Raw Clips - SocialVideotor</PageTitle>
+
+<FluentStack Orientation="Orientation.Vertical" Style="gap: 24px; max-width: 900px; margin: 0 auto;">
+
+    <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="gap: 12px;">
+        <FluentButton Appearance="Appearance.Outline" OnClick="@GoBack">
+            <FluentIcon Value="@(new Icons.Regular.Size20.ArrowLeft())" />
+        </FluentButton>
+        <div>
+            <h2 style="margin: 0;">✂️ Generate Raw Clips</h2>
+            <p style="margin: 4px 0 0 0; color: var(--neutral-foreground-hint); font-size: 0.85rem;">
+                Upload an MP4 and get 5–10 short vertical clips (9:16) — no text, no music, clean cuts.
+            </p>
+        </div>
+    </FluentStack>
+
+    @if (phase == Phase.Idle)
+    {
+        <FluentCard Style="padding: 32px; width: 100%;">
+            <FluentStack Orientation="Orientation.Vertical" Style="gap: 20px;">
+
+                <div style="border: 2px dashed var(--neutral-stroke-rest); border-radius: 12px; padding: 40px; text-align: center;">
+                    <FluentIcon Value="@(new Icons.Regular.Size48.Video())" Style="color: var(--accent-fill-rest);" />
+                    <p style="margin: 12px 0 4px 0; font-size: 1rem; font-weight: 600;">
+                        @(selectedFile == null ? "Select an MP4 file" : selectedFile.Name)
+                    </p>
+                    @if (selectedFile != null)
+                    {
+                        <p style="margin: 0 0 12px 0; color: var(--neutral-foreground-hint); font-size: 0.85rem;">
+                            @FormatFileSize(selectedFile.Size)
+                        </p>
+                    }
+                    <label style="cursor: pointer; display: inline-block;">
+                        <InputFile OnChange="@OnFileSelected" accept=".mp4" style="display: none;" />
+                        <FluentButton Appearance="Appearance.Outline" Style="pointer-events: none;">
+                            <FluentIcon Value="@(new Icons.Regular.Size20.FolderOpen())" Slot="start" />
+                            @(selectedFile == null ? "Browse Files" : "Change File")
+                        </FluentButton>
+                    </label>
+                    <p style="color: var(--neutral-foreground-hint); font-size: 0.78rem; margin: 8px 0 0 0;">
+                        MP4 only · Max 500 MB
+                    </p>
+                </div>
+
+                @if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    <FluentMessageBar Intent="MessageIntent.Error">@errorMessage</FluentMessageBar>
+                }
+
+                <FluentStack Orientation="Orientation.Horizontal" Style="gap: 12px; justify-content: flex-end;">
+                    <FluentButton Appearance="Appearance.Outline" OnClick="@GoBack">Cancel</FluentButton>
+                    <FluentButton Appearance="Appearance.Accent" OnClick="@StartUpload" Disabled="@(selectedFile == null)">
+                        <FluentIcon Value="@(new Icons.Regular.Size20.Play())" Slot="start" />
+                        Generate Clips
+                    </FluentButton>
+                </FluentStack>
+
+            </FluentStack>
+        </FluentCard>
+    }
+
+    @if (phase == Phase.Uploading || phase == Phase.Processing)
+    {
+        <FluentCard Style="padding: 32px; width: 100%;">
+            <FluentStack Orientation="Orientation.Vertical" Style="gap: 20px; align-items: center; text-align: center;">
+                <FluentProgressRing Style="width: 64px; height: 64px;" />
+                <div>
+                    <h3 style="margin: 0;">@(currentJob?.StatusMessage ?? "Working…")</h3>
+                    <p style="margin: 4px 0 0 0; color: var(--neutral-foreground-hint); font-size: 0.85rem;">
+                        @(phase == Phase.Uploading ? "Uploading your video…" : "Splitting into vertical clips…")
+                    </p>
+                </div>
+                @if (currentJob != null && currentJob.ProgressPercent > 0)
+                {
+                    <div style="width: 100%; max-width: 400px;">
+                        <FluentProgress Value="@currentJob.ProgressPercent" Max="100" />
+                        <p style="margin: 4px 0 0 0; font-size: 0.8rem; color: var(--neutral-foreground-hint);">
+                            @currentJob.ProgressPercent%
+                        </p>
+                    </div>
+                }
+            </FluentStack>
+        </FluentCard>
+    }
+
+    @if (phase == Phase.Done && currentJob != null)
+    {
+        @if (!currentJob.FfmpegAvailable)
+        {
+            <FluentMessageBar Intent="MessageIntent.Warning">
+                <b>FFmpeg not found.</b> Preview shows time-range sections of the original video.
+                Install FFmpeg on the server to generate individually downloadable 9:16 clips.
+            </FluentMessageBar>
+        }
+
+        <FluentCard Style="padding: 20px; width: 100%;">
+            <FluentStack Orientation="Orientation.Vertical" Style="gap: 16px;">
+                <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="justify-content: space-between;">
+                    <h3 style="margin: 0;">
+                        🎬 @currentJob.Clips.Count Clips — @currentJob.OriginalFilename
+                        <span style="font-weight: 400; font-size: 0.85rem; color: var(--neutral-foreground-hint);">
+                            (source: @FormatDuration(currentJob.VideoDuration))
+                        </span>
+                    </h3>
+                    <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px;">
+                        <span style="font-size: 0.8rem; color: var(--neutral-foreground-hint); align-self: center;"
+                              aria-label="Auto-deletion time">
+                            <FluentIcon Value="@(new Icons.Regular.Size16.Timer())" />
+                            Auto-deletes @currentJob.ExpiresAt.ToLocalTime().ToString("MMM d, h:mm tt")
+                        </span>
+                        <FluentButton Appearance="Appearance.Outline" OnClick="@DeleteJob">
+                            <FluentIcon Value="@(new Icons.Regular.Size20.Delete())" Slot="start" />
+                            Delete
+                        </FluentButton>
+                        <FluentButton Appearance="Appearance.Outline" OnClick="@Reset">
+                            <FluentIcon Value="@(new Icons.Regular.Size20.ArrowCounterclockwise())" Slot="start" />
+                            Upload Another
+                        </FluentButton>
+                    </FluentStack>
+                </FluentStack>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px;">
+                    @foreach (var clip in currentJob.Clips)
+                    {
+                        <FluentCard Style="padding: 0; overflow: hidden;">
+                            <FluentStack Orientation="Orientation.Vertical" Style="gap: 0;">
+                                <div style="background: #000; aspect-ratio: 9/16; max-height: 360px; overflow: hidden; display: flex; align-items: center; justify-content: center;">
+                                    <video controls preload="metadata"
+                                           style="width: 100%; height: 100%; object-fit: contain;"
+                                           src="@clip.PreviewUrl">
+                                        Your browser does not support the video element.
+                                    </video>
+                                </div>
+                                <FluentStack Orientation="Orientation.Vertical" Style="gap: 8px; padding: 12px;">
+                                    <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="justify-content: space-between;">
+                                        <span style="font-weight: 600;">Clip @clip.ClipNumber</span>
+                                        <FluentBadge Appearance="Appearance.Accent">@FormatDuration(clip.Duration)</FluentBadge>
+                                    </FluentStack>
+                                    <span style="font-size: 0.8rem; color: var(--neutral-foreground-hint);">
+                                        @FormatTime(clip.StartTime) – @FormatTime(clip.EndTime)
+                                    </span>
+                                    <a href="@clip.DownloadUrl" download style="text-decoration: none;">
+                                        <FluentButton Appearance="Appearance.Outline" Style="width: 100%;">
+                                            <FluentIcon Value="@(new Icons.Regular.Size20.ArrowDownload())" Slot="start" />
+                                            Download
+                                        </FluentButton>
+                                    </a>
+                                </FluentStack>
+                            </FluentStack>
+                        </FluentCard>
+                    }
+                </div>
+            </FluentStack>
+        </FluentCard>
+    }
+
+    @if (phase == Phase.Failed)
+    {
+        <FluentCard Style="padding: 32px; width: 100%;">
+            <FluentStack Orientation="Orientation.Vertical" Style="gap: 16px; align-items: center; text-align: center;">
+                <FluentIcon Value="@(new Icons.Regular.Size48.ErrorCircle())" Style="color: var(--error-foreground);" />
+                <div>
+                    <h3 style="margin: 0;">Processing Failed</h3>
+                    <p style="margin: 8px 0 0 0; color: var(--neutral-foreground-hint);">@currentJob?.ErrorMessage</p>
+                </div>
+                <FluentButton Appearance="Appearance.Accent" OnClick="@Reset">Try Again</FluentButton>
+            </FluentStack>
+        </FluentCard>
+    }
+
+</FluentStack>
+
+@code {
+    private enum Phase { Idle, Uploading, Processing, Done, Failed }
+
+    private Phase phase = Phase.Idle;
+    private IBrowserFile? selectedFile;
+    private RawClipJob? currentJob;
+    private string errorMessage = string.Empty;
+    private Timer? pollingTimer;
+    private int _pollInProgress; // 0 = idle, 1 = executing; prevents overlapping callbacks
+
+    private void OnFileSelected(InputFileChangeEventArgs e)
+    {
+        errorMessage = string.Empty;
+        selectedFile = e.File;
+    }
+
+    private async Task StartUpload()
+    {
+        if (selectedFile == null) return;
+
+        const long maxSize = 500L * 1024 * 1024; // 500 MB
+        if (selectedFile.Size > maxSize)
+        {
+            errorMessage = "File exceeds the 500 MB limit.";
+            return;
+        }
+
+        errorMessage = string.Empty;
+        phase = Phase.Uploading;
+        StateHasChanged();
+
+        try
+        {
+            await using var stream = selectedFile.OpenReadStream(maxAllowedSize: maxSize);
+            currentJob = await RawClipService.StartProcessingAsync(stream, selectedFile.Name, selectedFile.Size);
+            StartPolling();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+            phase = Phase.Idle;
+        }
+    }
+
+    private void StartPolling()
+    {
+        pollingTimer = new Timer(async _ =>
+        {
+            // Prevent overlapping callbacks when processing takes longer than the interval
+            if (Interlocked.CompareExchange(ref _pollInProgress, 1, 0) != 0) return;
+            try
+            {
+                if (currentJob == null) return;
+                var job = RawClipService.GetJob(currentJob.Id);
+                if (job == null) return;
+
+                await InvokeAsync(() =>
+                {
+                    currentJob = job;
+                    phase = job.Status switch
+                    {
+                        RawClipJobStatus.Uploading => Phase.Uploading,
+                        RawClipJobStatus.Processing => Phase.Processing,
+                        RawClipJobStatus.Ready => Phase.Done,
+                        RawClipJobStatus.Failed => Phase.Failed,
+                        _ => Phase.Processing
+                    };
+
+                    if (phase is Phase.Done or Phase.Failed)
+                        StopPolling();
+
+                    StateHasChanged();
+                });
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _pollInProgress, 0);
+            }
+        }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+    }
+
+    private void StopPolling()
+    {
+        pollingTimer?.Dispose();
+        pollingTimer = null;
+    }
+
+    private void Reset()
+    {
+        StopPolling();
+        Interlocked.Exchange(ref _pollInProgress, 0);
+        selectedFile = null;
+        currentJob = null;
+        errorMessage = string.Empty;
+        phase = Phase.Idle;
+    }
+
+    private void DeleteJob()
+    {
+        if (currentJob == null) return;
+        RawClipService.DeleteJob(currentJob.Id);
+        Reset();
+    }
+
+    private void GoBack() => NavigationManager.NavigateTo("/");
+
+    public void Dispose() => StopPolling();
+
+    // ── Formatting helpers ──────────────────────────────────────────────────
+
+    private static string FormatFileSize(long bytes)
+    {
+        if (bytes >= 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        if (bytes >= 1024) return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes} B";
+    }
+
+    private static string FormatDuration(double seconds)
+    {
+        var ts = TimeSpan.FromSeconds(seconds);
+        if (ts.TotalHours >= 1) return $"{(int)ts.TotalHours}h {ts.Minutes}m {ts.Seconds}s";
+        if (ts.TotalMinutes >= 1) return $"{(int)ts.TotalMinutes}m {ts.Seconds}s";
+        return $"{ts.Seconds}s";
+    }
+
+    private static string FormatTime(double seconds)
+    {
+        var ts = TimeSpan.FromSeconds(seconds);
+        return ts.TotalHours >= 1
+            ? ts.ToString(@"h\:mm\:ss")
+            : ts.ToString(@"m\:ss");
+    }
+}

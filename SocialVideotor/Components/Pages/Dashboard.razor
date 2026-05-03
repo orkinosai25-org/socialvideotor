@@ -22,6 +22,10 @@
             <FluentIcon Value="@(new Icons.Regular.Size20.Add())" Slot="start" />
             New Project
         </FluentButton>
+        <FluentButton Appearance="Appearance.Outline" OnClick="@GoToRawClips">
+            <FluentIcon Value="@(new Icons.Regular.Size20.Cut())" Slot="start" />
+            Raw Clips
+        </FluentButton>
     </FluentStack>
 
     @if (!projects.Any())
@@ -30,7 +34,13 @@
             <FluentIcon Value="@(new Icons.Regular.Size48.Video())" Style="color: var(--accent-fill-rest);" />
             <h3>No projects yet</h3>
             <p style="color: var(--neutral-foreground-hint);">Create your first social media video project</p>
-            <FluentButton Appearance="Appearance.Accent" OnClick="@CreateNewProject">Get Started</FluentButton>
+            <FluentStack Orientation="Orientation.Horizontal" Style="gap: 12px; justify-content: center; flex-wrap: wrap;">
+                <FluentButton Appearance="Appearance.Accent" OnClick="@CreateNewProject">Get Started</FluentButton>
+                <FluentButton Appearance="Appearance.Outline" OnClick="@GoToRawClips">
+                    <FluentIcon Value="@(new Icons.Regular.Size20.Cut())" Slot="start" />
+                    Generate Raw Clips
+                </FluentButton>
+            </FluentStack>
         </FluentCard>
     }
     else
@@ -92,6 +102,11 @@
     private void CreateNewProject()
     {
         NavigationManager.NavigateTo("/new-project");
+    }
+
+    private void GoToRawClips()
+    {
+        NavigationManager.NavigateTo("/upload-video");
     }
 
     private void OpenProject(string id)
