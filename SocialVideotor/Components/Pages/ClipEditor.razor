@@ -70,10 +70,10 @@ else
                                         </div>
                                     </FluentStack>
                                     <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px; flex-wrap: wrap;">
-                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeStart(-0.5))">Start -0.5s</FluentButton>
-                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeStart(0.5))">Start +0.5s</FluentButton>
-                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeEnd(-0.5))">End -0.5s</FluentButton>
-                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeEnd(0.5))">End +0.5s</FluentButton>
+                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeStart(-TrimStepSeconds))">Start -0.5s</FluentButton>
+                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeStart(TrimStepSeconds))">Start +0.5s</FluentButton>
+                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeEnd(-TrimStepSeconds))">End -0.5s</FluentButton>
+                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeEnd(TrimStepSeconds))">End +0.5s</FluentButton>
                                     </FluentStack>
                                     <div>
                                         <FluentLabel>Description</FluentLabel>
@@ -215,7 +215,7 @@ else
     private void NudgeStart(double amount)
     {
         if (selectedClip == null) return;
-        selectedClip.StartTime += TrimStepSeconds * Math.Sign(amount);
+        selectedClip.StartTime += amount;
         NormalizeTrimBounds();
         StateHasChanged();
     }
@@ -223,7 +223,7 @@ else
     private void NudgeEnd(double amount)
     {
         if (selectedClip == null) return;
-        selectedClip.EndTime += TrimStepSeconds * Math.Sign(amount);
+        selectedClip.EndTime += amount;
         NormalizeTrimBounds();
         StateHasChanged();
     }
