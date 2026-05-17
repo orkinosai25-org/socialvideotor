@@ -51,25 +51,38 @@ else
                         <FluentTabs>
                             <FluentTab Label="Clip Settings">
                                 <FluentStack Orientation="Orientation.Vertical" Style="gap: 16px; padding-top: 16px;">
+                                    <FluentBadge Appearance="Appearance.Accent">Edit Mode</FluentBadge>
                                     <div>
                                         <FluentLabel>Clip Title</FluentLabel>
                                         <FluentTextField @bind-Value="selectedClip.Title" Style="width: 100%;" />
                                     </div>
+                                    <FluentLabel style="font-size: 0.85rem; color: var(--neutral-foreground-hint);">
+                                        Trim start/end for quick adjustments. Preview updates live as you edit.
+                                    </FluentLabel>
                                     <FluentStack Orientation="Orientation.Horizontal" Style="gap: 16px;">
                                         <div style="flex: 1;">
                                             <FluentLabel>Start Time (seconds)</FluentLabel>
-                                            <FluentNumberField TValue="double" @bind-Value="selectedClip.StartTime" Min="0" Style="width: 100%;" />
+                                            <FluentNumberField TValue="double" @bind-Value="selectedClip.StartTime" @bind-Value:after="OnTrimChanged" Min="0" Style="width: 100%;" />
                                         </div>
                                         <div style="flex: 1;">
                                             <FluentLabel>End Time (seconds)</FluentLabel>
-                                            <FluentNumberField TValue="double" @bind-Value="selectedClip.EndTime" Min="0" Style="width: 100%;" />
+                                            <FluentNumberField TValue="double" @bind-Value="selectedClip.EndTime" @bind-Value:after="OnTrimChanged" Min="0" Style="width: 100%;" />
                                         </div>
+                                    </FluentStack>
+                                    <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px; flex-wrap: wrap;">
+                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeStart(-0.5))">Start -0.5s</FluentButton>
+                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeStart(0.5))">Start +0.5s</FluentButton>
+                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeEnd(-0.5))">End -0.5s</FluentButton>
+                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeEnd(0.5))">End +0.5s</FluentButton>
                                     </FluentStack>
                                     <div>
                                         <FluentLabel>Description</FluentLabel>
                                         <FluentTextArea @bind-Value="selectedClip.Description" Style="width: 100%;" Rows="3" />
                                     </div>
-                                    <FluentButton Appearance="Appearance.Accent" OnClick="@SaveClip">Save Changes</FluentButton>
+                                    <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px;">
+                                        <FluentButton Appearance="Appearance.Accent" OnClick="@SaveClip">Save Changes</FluentButton>
+                                        <FluentButton Appearance="Appearance.Outline" OnClick="@ResetTrimToOriginal">Reset to Original</FluentButton>
+                                    </FluentStack>
                                 </FluentStack>
                             </FluentTab>
                             <FluentTab Label="Text Tiles">
@@ -120,19 +133,28 @@ else
     private VideoProject? project;
     private List<VideoClip> selectedClips = new();
     private VideoClip? selectedClip;
+    private readonly Dictionary<string, (double StartTime, double EndTime)> originalTrimBounds = new();
+    private const double TrimStepSeconds = 0.5;
+    private const double MinimumTrimDurationSeconds = 0.1;
 
     protected override void OnInitialized()
     {
         project = ProjectService.GetProject(ProjectId);
         if (project != null)
         {
+            originalTrimBounds.Clear();
+            foreach (var clip in project.Clips)
+            {
+                originalTrimBounds[clip.Id] = (clip.StartTime, clip.EndTime);
+            }
+
             selectedClips = project.Clips.Where(c => c.IsSelected).ToList();
             if (!selectedClips.Any()) selectedClips = project.Clips.ToList();
-            selectedClip = selectedClips.FirstOrDefault();
+            selectedClip = CreateEditableClip(selectedClips.FirstOrDefault());
         }
     }
 
-    private void SelectClip(VideoClip clip) => selectedClip = clip;
+    private void SelectClip(VideoClip clip) => selectedClip = CreateEditableClip(clip);
 
     private void AddTextTile()
     {
@@ -164,7 +186,103 @@ else
     private void SaveClip()
     {
         if (project == null || selectedClip == null) return;
+        NormalizeTrimBounds();
         ProjectService.UpdateClip(project.Id, selectedClip);
+
+        project = ProjectService.GetProject(ProjectId);
+        if (project == null) return;
+
+        selectedClips = project.Clips.Where(c => c.IsSelected).ToList();
+        if (!selectedClips.Any()) selectedClips = project.Clips.ToList();
+        selectedClip = CreateEditableClip(selectedClips.FirstOrDefault(c => c.Id == selectedClip.Id));
+    }
+
+    private void ResetTrimToOriginal()
+    {
+        if (selectedClip == null) return;
+        var originalBounds = GetOriginalTrimBounds(selectedClip.Id);
+        selectedClip.StartTime = originalBounds.StartTime;
+        selectedClip.EndTime = originalBounds.EndTime;
+        StateHasChanged();
+    }
+
+    private void OnTrimChanged()
+    {
+        NormalizeTrimBounds();
+        StateHasChanged();
+    }
+
+    private void NudgeStart(double amount)
+    {
+        if (selectedClip == null) return;
+        selectedClip.StartTime += TrimStepSeconds * Math.Sign(amount);
+        NormalizeTrimBounds();
+        StateHasChanged();
+    }
+
+    private void NudgeEnd(double amount)
+    {
+        if (selectedClip == null) return;
+        selectedClip.EndTime += TrimStepSeconds * Math.Sign(amount);
+        NormalizeTrimBounds();
+        StateHasChanged();
+    }
+
+    private void NormalizeTrimBounds()
+    {
+        if (selectedClip == null) return;
+
+        var originalBounds = GetOriginalTrimBounds(selectedClip.Id);
+        var maxDuration = Math.Max(0, originalBounds.EndTime - originalBounds.StartTime);
+        var minimumDuration = Math.Min(MinimumTrimDurationSeconds, maxDuration);
+        var maxStart = originalBounds.EndTime - minimumDuration;
+
+        selectedClip.StartTime = Math.Clamp(selectedClip.StartTime, originalBounds.StartTime, maxStart);
+        selectedClip.EndTime = Math.Clamp(selectedClip.EndTime, selectedClip.StartTime + minimumDuration, originalBounds.EndTime);
+    }
+
+    private (double StartTime, double EndTime) GetOriginalTrimBounds(string clipId)
+    {
+        if (originalTrimBounds.TryGetValue(clipId, out var bounds)) return bounds;
+        return (0, double.MaxValue);
+    }
+
+    private static VideoClip? CreateEditableClip(VideoClip? clip)
+    {
+        if (clip == null) return null;
+        return new VideoClip
+        {
+            Id = clip.Id,
+            Title = clip.Title,
+            StartTime = clip.StartTime,
+            EndTime = clip.EndTime,
+            ThumbnailUrl = clip.ThumbnailUrl,
+            Suggestions = clip.Suggestions.Select(s => new GenerationSuggestion
+            {
+                Id = s.Id,
+                Title = s.Title,
+                Description = s.Description,
+                StartTime = s.StartTime,
+                EndTime = s.EndTime,
+                Hashtags = s.Hashtags.ToList(),
+                RecommendedPlatforms = s.RecommendedPlatforms.ToList(),
+                EngagementScore = s.EngagementScore,
+                SuggestedCaption = s.SuggestedCaption
+            }).ToList(),
+            IsSelected = clip.IsSelected,
+            Description = clip.Description,
+            TextTiles = clip.TextTiles.Select(t => new TextTile
+            {
+                Id = t.Id,
+                Text = t.Text,
+                Position = t.Position,
+                FontSize = t.FontSize,
+                Color = t.Color,
+                BackgroundColor = t.BackgroundColor,
+                StartTime = t.StartTime,
+                EndTime = t.EndTime
+            }).ToList()
+        };
     }
 
     private void GoBack() => NavigationManager.NavigateTo($"/video-analysis/{ProjectId}");
