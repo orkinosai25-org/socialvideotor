@@ -142,7 +142,7 @@ else
 
     protected override void OnParametersSet()
     {
-        if (loadedProjectId == ProjectId) return;
+        if (string.Equals(loadedProjectId, ProjectId, StringComparison.Ordinal)) return;
         LoadProject();
     }
 
@@ -223,7 +223,7 @@ else
     private void NudgeStart(double amount)
     {
         if (selectedClip == null) return;
-        selectedClip.StartTime += amount;
+        selectedClip.StartTime = Math.Round(selectedClip.StartTime + amount, 3);
         NormalizeTrimBounds();
         StateHasChanged();
     }
@@ -231,7 +231,7 @@ else
     private void NudgeEnd(double amount)
     {
         if (selectedClip == null) return;
-        selectedClip.EndTime += amount;
+        selectedClip.EndTime = Math.Round(selectedClip.EndTime + amount, 3);
         NormalizeTrimBounds();
         StateHasChanged();
     }
@@ -245,8 +245,11 @@ else
         var minimumDuration = Math.Min(MinimumTrimDurationSeconds, maxDuration);
         var maxStart = originalBounds.EndTime - minimumDuration;
 
-        selectedClip.StartTime = Math.Clamp(selectedClip.StartTime, originalBounds.StartTime, maxStart);
-        selectedClip.EndTime = Math.Clamp(selectedClip.EndTime, selectedClip.StartTime + minimumDuration, originalBounds.EndTime);
+        var clampedStart = Math.Clamp(selectedClip.StartTime, originalBounds.StartTime, maxStart);
+        var clampedEnd = Math.Clamp(selectedClip.EndTime, clampedStart + minimumDuration, originalBounds.EndTime);
+
+        selectedClip.StartTime = clampedStart;
+        selectedClip.EndTime = clampedEnd;
     }
 
     private void RefreshClipSelection(string? preferredClipId = null)
