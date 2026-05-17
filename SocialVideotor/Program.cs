@@ -305,7 +305,7 @@ static (bool IsValid, HashSet<int> ClipNumbers, string ErrorMessage) ParseClipNu
     {
         if (string.IsNullOrWhiteSpace(part))
             return (false, new HashSet<int>(), "Invalid clip number list. Use comma-separated positive integers like 1,2,3.");
-        if (!int.TryParse(part, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) || parsed <= 0)
+        if (!int.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) || parsed <= 0)
             return (false, new HashSet<int>(), $"Invalid clip number '{part}'. Use positive integers like 1,2,3.");
         parsedClipNumbers.Add(parsed);
     }
@@ -356,7 +356,7 @@ static async Task<(bool Success, string? FilePath, bool DeleteAfterSend, string 
     var ffmpegAvailable = await IsFfmpegAvailableAsync(options.FfmpegPath, cancellationToken);
     if (!ffmpegAvailable)
     {
-        logger.LogWarning("Export failed because FFmpeg is unavailable. Job={JobId} Clip={ClipNumber} Format={Format}", job.Id, clip.ClipNumber, format);
+        logger.LogWarning("Export failed because FFmpeg is unavailable for requested clip export.");
         return (false, null, false, "FFmpeg is required for this export format.");
     }
 
@@ -365,7 +365,7 @@ static async Task<(bool Success, string? FilePath, bool DeleteAfterSend, string 
         return (false, null, false, "Source video file was not found.");
 
     var tempFilePath = Path.Combine(Path.GetTempPath(), $"socialvideotor-export-{Guid.NewGuid():N}.mp4");
-    var keepTempFileForCaller = false;
+    var shouldCleanup = true;
     try
     {
         var useExtractedClipAsInput = File.Exists(extractedClipPath);
@@ -401,26 +401,25 @@ static async Task<(bool Success, string? FilePath, bool DeleteAfterSend, string 
         timeoutSource.CancelAfter(TimeSpan.FromSeconds(exportTimeoutSeconds));
         await process.WaitForExitAsync(timeoutSource.Token);
         _ = await outputTask;
-        var error = await errorTask;
+        _ = await errorTask;
 
         if (process.ExitCode != 0 || !File.Exists(tempFilePath))
         {
-            logger.LogWarning("FFmpeg export failed. Job={JobId} Clip={ClipNumber} Format={Format} ExitCode={ExitCode} Error={Error}",
-                job.Id, clip.ClipNumber, format, process.ExitCode, TrimForLog(error));
+            logger.LogWarning("FFmpeg export failed. ExitCode={ExitCode}", process.ExitCode);
             return (false, null, false, "Clip export failed.");
         }
 
-        keepTempFileForCaller = true;
+        shouldCleanup = false;
         return (true, tempFilePath, true, string.Empty);
     }
     catch (OperationCanceledException)
     {
-        logger.LogWarning("FFmpeg export timed out/cancelled. Job={JobId} Clip={ClipNumber} Format={Format}", job.Id, clip.ClipNumber, format);
+        logger.LogWarning("FFmpeg export timed out/cancelled.");
         return (false, null, false, "Clip export timed out.");
     }
     finally
     {
-        if (!keepTempFileForCaller && File.Exists(tempFilePath))
+        if (shouldCleanup && File.Exists(tempFilePath))
             File.Delete(tempFilePath);
     }
 }
@@ -450,13 +449,4 @@ static async Task<bool> IsFfmpegAvailableAsync(string ffmpegPath, CancellationTo
     {
         return false;
     }
-}
-
-static string TrimForLog(string value)
-{
-    if (string.IsNullOrWhiteSpace(value))
-        return string.Empty;
-
-    const int maxErrorLogLength = 500;
-    return value.Length <= maxErrorLogLength ? value : value[..maxErrorLogLength] + "...";
 }

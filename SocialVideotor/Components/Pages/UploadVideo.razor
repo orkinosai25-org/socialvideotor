@@ -139,12 +139,22 @@
                     <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="gap: 8px; flex-wrap: wrap;">
                         <FluentButton Appearance="Appearance.Outline" OnClick="@SelectAllClips">Select All</FluentButton>
                         <FluentButton Appearance="Appearance.Outline" OnClick="@ClearSelectedClips">Clear Selection</FluentButton>
-                        <a href="@GetSelectedDownloadUrl()" download="@GetSelectedZipFileName()" style="text-decoration: none;" aria-disabled="@(!HasSelectedClips())">
-                            <FluentButton Appearance="Appearance.Accent" Disabled="@(!HasSelectedClips())">
+                        @if (HasSelectedClips())
+                        {
+                            <a href="@GetSelectedDownloadUrl()" download="@GetSelectedZipFileName()" style="text-decoration: none;">
+                                <FluentButton Appearance="Appearance.Accent">
+                                    <FluentIcon Value="@(new Icons.Regular.Size20.ArrowDownload())" Slot="start" />
+                                    Download Selected (@GetSelectedClipCount())
+                                </FluentButton>
+                            </a>
+                        }
+                        else
+                        {
+                            <FluentButton Appearance="Appearance.Accent" Disabled="true">
                                 <FluentIcon Value="@(new Icons.Regular.Size20.ArrowDownload())" Slot="start" />
-                                Download Selected (@GetSelectedClipCount())
+                                Download Selected (0)
                             </FluentButton>
-                        </a>
+                        }
                     </FluentStack>
                 </FluentStack>
                 <span style="font-size: 0.8rem; color: var(--neutral-foreground-hint);">
