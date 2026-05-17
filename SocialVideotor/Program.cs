@@ -365,7 +365,7 @@ static async Task<(bool Success, string? FilePath, bool DeleteAfterSend, string 
         return (false, null, false, "Source video file was not found.");
 
     var tempFilePath = Path.Combine(Path.GetTempPath(), $"socialvideotor-export-{Guid.NewGuid():N}.mp4");
-    var shouldCleanup = true;
+    var cleanupTemporaryFile = true;
     try
     {
         var useExtractedClipAsInput = File.Exists(extractedClipPath);
@@ -409,7 +409,7 @@ static async Task<(bool Success, string? FilePath, bool DeleteAfterSend, string 
             return (false, null, false, "Clip export failed.");
         }
 
-        shouldCleanup = false;
+        cleanupTemporaryFile = false;
         return (true, tempFilePath, true, string.Empty);
     }
     catch (OperationCanceledException)
@@ -419,7 +419,7 @@ static async Task<(bool Success, string? FilePath, bool DeleteAfterSend, string 
     }
     finally
     {
-        if (shouldCleanup && File.Exists(tempFilePath))
+        if (cleanupTemporaryFile && File.Exists(tempFilePath))
             File.Delete(tempFilePath);
     }
 }

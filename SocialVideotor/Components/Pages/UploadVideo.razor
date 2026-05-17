@@ -427,7 +427,7 @@
 
     private string GetSelectedDownloadUrl()
     {
-        if (currentJob == null || !HasSelectedClips()) return string.Empty;
+        if (currentJob == null) return string.Empty;
         return $"/api/jobs/{currentJob.Id}/export?format={exportFormat}&clipNumbers={GetSelectedClipNumbersCsv()}";
     }
 
