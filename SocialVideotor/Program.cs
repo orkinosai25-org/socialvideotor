@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.FluentUI.AspNetCore.Components;
 using SocialVideotor.Components;
 using SocialVideotor.Services;
@@ -32,6 +34,16 @@ if (!app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseAntiforgery();
+
+static string ResolveUserId(HttpContext context)
+{
+    if (context.User.Identity?.IsAuthenticated == true)
+        return context.User.Identity.Name ?? "authenticated-user";
+
+    var fingerprint = $"{context.Connection.RemoteIpAddress}|{context.Request.Headers.UserAgent}";
+    var hash = SHA256.HashData(Encoding.UTF8.GetBytes(fingerprint));
+    return $"anon-{Convert.ToHexString(hash)[..16].ToLowerInvariant()}";
+}
 
 var safeJobIdPattern = new System.Text.RegularExpressions.Regex(
     @"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -76,9 +88,7 @@ app.MapPost("/api/jobs/upload", async (
         return Results.BadRequest("Missing file field named 'file'.");
 
     await using var stream = file.OpenReadStream();
-    var userId = request.Headers.TryGetValue("X-User-Id", out var headerUserId)
-        ? headerUserId.ToString()
-        : "anonymous";
+    var userId = ResolveUserId(request.HttpContext);
 
     var job = await rawClipService.StartProcessingAsync(stream, file.FileName, file.Length, userId, cancellationToken);
     return Results.Accepted($"/api/jobs/{job.Id}", job);
@@ -86,41 +96,38 @@ app.MapPost("/api/jobs/upload", async (
 
 app.MapGet("/api/jobs", (HttpRequest request, IRawClipService rawClipService) =>
 {
-    var userId = request.Query["userId"].ToString();
-    if (string.IsNullOrWhiteSpace(userId) && request.Headers.TryGetValue("X-User-Id", out var headerUserId))
-        userId = headerUserId.ToString();
-
+    var userId = ResolveUserId(request.HttpContext);
     var jobs = rawClipService.GetAllJobs(userId);
     return Results.Ok(jobs);
 });
 
 app.MapGet("/api/jobs/{jobId}", (string jobId, HttpRequest request, IRawClipService rawClipService) =>
 {
-    var userId = request.Query["userId"].ToString();
+    var userId = ResolveUserId(request.HttpContext);
     var job = rawClipService.GetJob(jobId);
     if (job == null) return Results.NotFound();
-    if (!string.IsNullOrWhiteSpace(userId) && !string.Equals(job.UserId, userId, StringComparison.OrdinalIgnoreCase))
+    if (!string.Equals(job.UserId, userId, StringComparison.OrdinalIgnoreCase))
         return Results.NotFound();
     return Results.Ok(job);
 });
 
 app.MapGet("/api/jobs/{jobId}/clips", (string jobId, HttpRequest request, IRawClipService rawClipService) =>
 {
-    var userId = request.Query["userId"].ToString();
+    var userId = ResolveUserId(request.HttpContext);
     var clips = rawClipService.GetClips(jobId, userId);
     return Results.Ok(clips);
 });
 
 app.MapGet("/api/jobs/{jobId}/status", (string jobId, HttpRequest request, IRawClipService rawClipService) =>
 {
-    var userId = request.Query["userId"].ToString();
+    var userId = ResolveUserId(request.HttpContext);
     var status = rawClipService.GetJobStatus(jobId, userId);
     return status.HasValue ? Results.Ok(status.Value) : Results.NotFound();
 });
 
 app.MapPost("/api/jobs/{jobId}/retry", async (string jobId, HttpRequest request, IRawClipService rawClipService, CancellationToken cancellationToken) =>
 {
-    var userId = request.Query["userId"].ToString();
+    var userId = ResolveUserId(request.HttpContext);
     var retried = await rawClipService.RetryJobAsync(jobId, userId, cancellationToken);
     return retried ? Results.Accepted($"/api/jobs/{jobId}") : Results.BadRequest();
 });

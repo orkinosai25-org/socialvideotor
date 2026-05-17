@@ -44,11 +44,14 @@ public class RawClipService : IRawClipService, IDisposable
     {
         ValidateUpload(filename, fileSize);
 
+        var jobId = Guid.NewGuid().ToString("D");
+
         var job = new RawClipJob
         {
+            Id = jobId,
             UserId = string.IsNullOrWhiteSpace(userId) ? "anonymous" : userId,
             SourceFileName = filename,
-            SourceBlobPath = $"jobs/{Guid.NewGuid():D}/source.mp4",
+            SourceBlobPath = $"jobs/{jobId}/source.mp4",
             Status = RawClipJobStatus.Uploading,
             StatusMessage = "Saving uploaded video…",
             FfmpegAvailable = IsFfmpegAvailable(),
@@ -56,8 +59,6 @@ public class RawClipService : IRawClipService, IDisposable
             UpdatedAtUtc = DateTime.UtcNow,
             ExpiresAtUtc = DateTime.UtcNow.AddHours(24)
         };
-
-        job.Id = job.SourceBlobPath.Split('/')[1];
 
         UpdateJob(job, j =>
         {
@@ -139,9 +140,14 @@ public class RawClipService : IRawClipService, IDisposable
 
     public Task<bool> RetryJobAsync(string jobId, string? userId = null, CancellationToken cancellationToken = default)
     {
+        if (!Guid.TryParse(jobId, out var parsedJobId))
+            return Task.FromResult(false);
+
+        var safeJobId = parsedJobId.ToString("D");
+
         lock (_jobsLock)
         {
-            if (!_jobs.TryGetValue(jobId, out var job)) return Task.FromResult(false);
+            if (!_jobs.TryGetValue(safeJobId, out var job)) return Task.FromResult(false);
             if (!string.IsNullOrWhiteSpace(userId) && !string.Equals(job.UserId, userId, StringComparison.OrdinalIgnoreCase))
                 return Task.FromResult(false);
             if (job.Status != RawClipJobStatus.Failed) return Task.FromResult(false);
@@ -161,7 +167,7 @@ public class RawClipService : IRawClipService, IDisposable
             SaveJobsUnsafe();
         }
 
-        _logger.LogInformation("Stage=RetryQueued Job={JobId}", jobId);
+        _logger.LogInformation("Stage=RetryQueued Job={JobId}", safeJobId);
         return Task.FromResult(true);
     }
 
@@ -214,7 +220,7 @@ public class RawClipService : IRawClipService, IDisposable
 
         try
         {
-            _storage.DeletePrefixAsync($"jobs/{jobId}").GetAwaiter().GetResult();
+            _storage.DeletePrefix($"jobs/{jobId}");
         }
         catch (Exception ex)
         {
@@ -352,7 +358,7 @@ public class RawClipService : IRawClipService, IDisposable
 
     private static (int count, double clipDuration) CalculateClipStrategy(double totalDuration)
     {
-        var count = (int)Math.Clamp(Math.Floor(totalDuration / 30), 3, 10);
+        var count = (int)Math.Clamp(Math.Floor(totalDuration / 30), 5, 10);
         var clipDuration = Math.Clamp(totalDuration / count, 15, 60);
         return (count, clipDuration);
     }
@@ -469,7 +475,11 @@ public class RawClipService : IRawClipService, IDisposable
 
     private void LoadJobs()
     {
-        if (!File.Exists(_jobsStatePath)) return;
+        if (!File.Exists(_jobsStatePath))
+        {
+            _logger.LogInformation("No persisted raw clip jobs found at startup (first run or clean state).");
+            return;
+        }
 
         try
         {
@@ -492,7 +502,7 @@ public class RawClipService : IRawClipService, IDisposable
     {
         lock (_jobsLock)
         {
-            foreach (var job in _jobs.Values.Where(j => j.Status is RawClipJobStatus.Uploading or RawClipJobStatus.Processing or RawClipJobStatus.Queued))
+            foreach (var job in _jobs.Values.Where(j => j.Status is RawClipJobStatus.Uploading or RawClipJobStatus.Processing))
             {
                 job.Status = RawClipJobStatus.Queued;
                 job.StatusMessage = "Recovered after restart; queued";
@@ -536,18 +546,58 @@ public class RawClipService : IRawClipService, IDisposable
             WriteIndented = true
         });
 
-        File.WriteAllText(_jobsStatePath, json);
+        var tempPath = _jobsStatePath + ".tmp";
+        File.WriteAllText(tempPath, json);
+        File.Move(tempPath, _jobsStatePath, true);
     }
 
     private static RawClipJob Clone(RawClipJob job)
     {
-        var json = JsonSerializer.Serialize(job);
-        return JsonSerializer.Deserialize<RawClipJob>(json)!;
+        return new RawClipJob
+        {
+            Id = job.Id,
+            UserId = job.UserId,
+            SourceFileName = job.SourceFileName,
+            SourceBlobPath = job.SourceBlobPath,
+            Status = job.Status,
+            StatusMessage = job.StatusMessage,
+            ProgressPercent = job.ProgressPercent,
+            Clips = job.Clips.Select(Clone).ToList(),
+            History = job.History.Select(h => new RawClipJobHistoryEntry
+            {
+                CreatedAtUtc = h.CreatedAtUtc,
+                Status = h.Status,
+                ProgressPercent = h.ProgressPercent,
+                Message = h.Message,
+                ErrorMessage = h.ErrorMessage
+            }).ToList(),
+            CreatedAtUtc = job.CreatedAtUtc,
+            UpdatedAtUtc = job.UpdatedAtUtc,
+            CompletedAtUtc = job.CompletedAtUtc,
+            ExpiresAtUtc = job.ExpiresAtUtc,
+            ErrorMessage = job.ErrorMessage,
+            VideoDurationSeconds = job.VideoDurationSeconds,
+            FfmpegAvailable = job.FfmpegAvailable
+        };
     }
 
     private static RawClip Clone(RawClip clip)
     {
-        var json = JsonSerializer.Serialize(clip);
-        return JsonSerializer.Deserialize<RawClip>(json)!;
+        return new RawClip
+        {
+            Id = clip.Id,
+            JobId = clip.JobId,
+            ClipNumber = clip.ClipNumber,
+            BlobPath = clip.BlobPath,
+            PreviewUrl = clip.PreviewUrl,
+            DownloadUrl = clip.DownloadUrl,
+            StartTimeSeconds = clip.StartTimeSeconds,
+            EndTimeSeconds = clip.EndTimeSeconds,
+            Format = clip.Format,
+            AspectRatio = clip.AspectRatio,
+            Title = clip.Title,
+            PurposeLabel = clip.PurposeLabel,
+            CreatedAtUtc = clip.CreatedAtUtc
+        };
     }
 }

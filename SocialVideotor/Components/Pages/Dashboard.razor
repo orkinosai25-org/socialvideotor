@@ -117,6 +117,8 @@
 </FluentCard>
 
 @code {
+    private const int MaxVisibleRawClipJobs = 8;
+
     private List<VideoProject> projects = new();
     private List<RawClipJob> rawClipJobs = new();
 
@@ -128,7 +130,7 @@
     private void LoadProjects()
     {
         projects = ProjectService.GetAllProjects().ToList();
-        rawClipJobs = RawClipService.GetAllJobs("anonymous").Take(8).ToList();
+        rawClipJobs = RawClipService.GetAllJobs().Take(MaxVisibleRawClipJobs).ToList();
     }
 
     private void CreateNewProject()
