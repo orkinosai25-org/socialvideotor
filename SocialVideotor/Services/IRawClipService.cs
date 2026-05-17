@@ -4,9 +4,12 @@ namespace SocialVideotor.Services;
 
 public interface IRawClipService
 {
-    Task<RawClipJob> StartProcessingAsync(Stream videoStream, string filename, long fileSize, CancellationToken cancellationToken = default);
+    Task<RawClipJob> StartProcessingAsync(Stream videoStream, string filename, long fileSize, string? contentType = null, string userId = "anonymous", CancellationToken cancellationToken = default);
     RawClipJob? GetJob(string jobId);
-    IEnumerable<RawClipJob> GetAllJobs();
-    /// <summary>Removes the job from memory and deletes all associated files on disk.</summary>
+    IEnumerable<RawClipJob> GetAllJobs(string? userId = null);
+    IEnumerable<RawClip> GetClips(string jobId, string? userId = null);
+    RawClipJobStatus? GetJobStatus(string jobId, string? userId = null);
+    Task<bool> RetryJobAsync(string jobId, string? userId = null, CancellationToken cancellationToken = default);
+    Task ProcessQueuedJobsAsync(CancellationToken cancellationToken);
     void DeleteJob(string jobId);
 }

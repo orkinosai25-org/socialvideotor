@@ -2,6 +2,8 @@
 @using SocialVideotor.Models
 @using SocialVideotor.Services
 @inject IProjectService ProjectService
+@inject IRawClipService RawClipService
+@inject IHttpContextAccessor HttpContextAccessor
 @inject NavigationManager NavigationManager
 @rendermode InteractiveServer
 
@@ -86,8 +88,40 @@
     }
 </FluentStack>
 
+<FluentCard Style="padding: 20px; width: 100%; margin-top: 16px;">
+    <FluentStack Orientation="Orientation.Vertical" Style="gap: 12px;">
+        <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="justify-content: space-between;">
+            <h3 style="margin: 0;">Video Processing Jobs</h3>
+            <FluentButton Appearance="Appearance.Outline" OnClick="@GoToRawClips">Upload Video</FluentButton>
+        </FluentStack>
+        @if (!rawClipJobs.Any())
+        {
+            <span style="color: var(--neutral-foreground-hint); font-size: 0.9rem;">No uploads yet.</span>
+        }
+        else
+        {
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px;">
+                @foreach (var job in rawClipJobs)
+                {
+                    <FluentCard Style="padding: 12px;">
+                        <FluentStack Orientation="Orientation.Vertical" Style="gap: 6px;">
+                            <strong>@job.SourceFileName</strong>
+                            <FluentBadge Appearance="@GetRawClipStatusAppearance(job.Status)">@job.Status</FluentBadge>
+                            <span style="font-size: 0.8rem; color: var(--neutral-foreground-hint);">@job.StatusMessage</span>
+                            <span style="font-size: 0.8rem; color: var(--neutral-foreground-hint);">@job.Clips.Count clip(s)</span>
+                        </FluentStack>
+                    </FluentCard>
+                }
+            </div>
+        }
+    </FluentStack>
+</FluentCard>
+
 @code {
+    private const int MaxVisibleRawClipJobs = 8;
+
     private List<VideoProject> projects = new();
+    private List<RawClipJob> rawClipJobs = new();
 
     protected override void OnInitialized()
     {
@@ -97,6 +131,7 @@
     private void LoadProjects()
     {
         projects = ProjectService.GetAllProjects().ToList();
+        rawClipJobs = RawClipService.GetAllJobs(GetCurrentUserId()).Take(MaxVisibleRawClipJobs).ToList();
     }
 
     private void CreateNewProject()
@@ -128,6 +163,13 @@
         _ => Appearance.Neutral
     };
 
+    private Appearance GetRawClipStatusAppearance(RawClipJobStatus status) => status switch
+    {
+        RawClipJobStatus.Ready => Appearance.Accent,
+        RawClipJobStatus.Failed => Appearance.Neutral,
+        _ => Appearance.Neutral
+    };
+
     private string GetPlatformEmoji(SocialPlatform platform) => platform switch
     {
         SocialPlatform.Facebook => "📘",
@@ -141,5 +183,10 @@
     {
         var ts = TimeSpan.FromSeconds(seconds);
         return ts.TotalHours >= 1 ? $"{(int)ts.TotalHours}h {ts.Minutes}m" : $"{ts.Minutes}m {ts.Seconds}s";
+    }
+
+    private string GetCurrentUserId()
+    {
+        return UserIdentityResolver.ResolveFromContextOrFallback(HttpContextAccessor.HttpContext);
     }
 }

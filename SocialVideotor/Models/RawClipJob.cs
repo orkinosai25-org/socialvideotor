@@ -3,21 +3,26 @@ namespace SocialVideotor.Models;
 public class RawClipJob
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
-    public string OriginalFilename { get; set; } = string.Empty;
-    public RawClipJobStatus Status { get; set; } = RawClipJobStatus.Uploading;
-    public string StatusMessage { get; set; } = "Uploading video…";
+    public string UserId { get; set; } = "anonymous";
+    public string SourceFileName { get; set; } = string.Empty;
+    public string SourceBlobPath { get; set; } = string.Empty;
+    public RawClipJobStatus Status { get; set; } = RawClipJobStatus.Queued;
+    public string StatusMessage { get; set; } = "Queued";
     public int ProgressPercent { get; set; }
     public List<RawClip> Clips { get; set; } = new();
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    /// <summary>Clips and job data are automatically deleted after this time (24 h from creation).</summary>
-    public DateTime ExpiresAt { get; set; } = DateTime.UtcNow.AddHours(24);
+    public List<RawClipJobHistoryEntry> History { get; set; } = new();
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime? CompletedAtUtc { get; set; }
+    public DateTime ExpiresAtUtc { get; set; } = DateTime.UtcNow.AddHours(24);
     public string ErrorMessage { get; set; } = string.Empty;
-    public double VideoDuration { get; set; }
+    public double VideoDurationSeconds { get; set; }
     public bool FfmpegAvailable { get; set; }
 }
 
 public enum RawClipJobStatus
 {
+    Queued,
     Uploading,
     Processing,
     Ready,
@@ -27,10 +32,26 @@ public enum RawClipJobStatus
 public class RawClip
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
+    public string JobId { get; set; } = string.Empty;
     public int ClipNumber { get; set; }
+    public string BlobPath { get; set; } = string.Empty;
     public string PreviewUrl { get; set; } = string.Empty;
     public string DownloadUrl { get; set; } = string.Empty;
-    public double StartTime { get; set; }
-    public double EndTime { get; set; }
-    public double Duration => EndTime - StartTime;
+    public double StartTimeSeconds { get; set; }
+    public double EndTimeSeconds { get; set; }
+    public double DurationSeconds => EndTimeSeconds - StartTimeSeconds;
+    public string Format { get; set; } = "mp4";
+    public string AspectRatio { get; set; } = "9:16";
+    public string? Title { get; set; }
+    public string? PurposeLabel { get; set; }
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+}
+
+public class RawClipJobHistoryEntry
+{
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public RawClipJobStatus Status { get; set; }
+    public int ProgressPercent { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public string? ErrorMessage { get; set; }
 }
