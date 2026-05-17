@@ -1,7 +1,11 @@
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.Extensions.Options;
+using SocialVideotor.Models;
 using SocialVideotor.Components;
 using SocialVideotor.Services;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO.Compression;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -126,6 +130,88 @@ app.MapGet("/api/jobs/{jobId}/status", (string jobId, HttpRequest request, IRawC
     return status.HasValue ? Results.Ok(status.Value) : Results.NotFound();
 });
 
+app.MapGet("/api/jobs/{jobId}/clips/{clipNumber:int}/export", async (
+    HttpContext httpContext,
+    string jobId,
+    int clipNumber,
+    string? format,
+    IRawClipService rawClipService,
+    IClipStorage storage,
+    IOptions<VideoProcessingOptions> options,
+    CancellationToken cancellationToken) =>
+{
+    if (!safeJobIdPattern.IsMatch(jobId)) return Results.BadRequest();
+    if (clipNumber <= 0) return Results.BadRequest();
+
+    var userId = UserIdentityResolver.ResolveForRequest(httpContext);
+    var job = rawClipService.GetJob(jobId);
+    if (job == null) return Results.NotFound();
+    if (!string.Equals(job.UserId, userId, StringComparison.OrdinalIgnoreCase))
+        return Results.NotFound();
+
+    var clip = job.Clips.FirstOrDefault(c => c.ClipNumber == clipNumber);
+    if (clip == null) return Results.NotFound();
+
+    if (!TryNormalizeExportFormat(format, out var normalizedFormat, out var aspectLabel))
+        return Results.BadRequest("Unsupported format. Use 'vertical' or 'square'.");
+
+    var export = await BuildClipExportAsync(job, clip, normalizedFormat, options.Value, storage, cancellationToken);
+    if (!export.Success) return Results.BadRequest(export.ErrorMessage);
+
+    var fileName = BuildExportFileName(job.SourceFileName, clip.ClipNumber, aspectLabel);
+    return Results.File(export.Content, "video/mp4", fileName);
+});
+
+app.MapGet("/api/jobs/{jobId}/export", async (
+    HttpContext httpContext,
+    string jobId,
+    string? format,
+    string? clipNumbers,
+    IRawClipService rawClipService,
+    IClipStorage storage,
+    IOptions<VideoProcessingOptions> options,
+    CancellationToken cancellationToken) =>
+{
+    if (!safeJobIdPattern.IsMatch(jobId)) return Results.BadRequest();
+
+    var userId = UserIdentityResolver.ResolveForRequest(httpContext);
+    var job = rawClipService.GetJob(jobId);
+    if (job == null) return Results.NotFound();
+    if (!string.Equals(job.UserId, userId, StringComparison.OrdinalIgnoreCase))
+        return Results.NotFound();
+
+    if (!TryNormalizeExportFormat(format, out var normalizedFormat, out var aspectLabel))
+        return Results.BadRequest("Unsupported format. Use 'vertical' or 'square'.");
+
+    var selectedClipNumbers = ParseClipNumbers(clipNumbers);
+    if (!selectedClipNumbers.Any())
+        return Results.BadRequest("Select at least one clip.");
+
+    var clips = job.Clips
+        .Where(c => selectedClipNumbers.Contains(c.ClipNumber))
+        .OrderBy(c => c.ClipNumber)
+        .ToList();
+    if (!clips.Any()) return Results.BadRequest("No matching clips.");
+
+    await using var zipStream = new MemoryStream();
+    using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Create, leaveOpen: true))
+    {
+        foreach (var clip in clips)
+        {
+            var export = await BuildClipExportAsync(job, clip, normalizedFormat, options.Value, storage, cancellationToken);
+            if (!export.Success) return Results.BadRequest(export.ErrorMessage);
+
+            var fileName = BuildExportFileName(job.SourceFileName, clip.ClipNumber, aspectLabel);
+            var entry = archive.CreateEntry(fileName, CompressionLevel.Fastest);
+            await using var entryStream = entry.Open();
+            await entryStream.WriteAsync(export.Content, cancellationToken);
+        }
+    }
+
+    var zipFileName = BuildSelectedZipFileName(job.SourceFileName, aspectLabel);
+    return Results.File(zipStream.ToArray(), "application/zip", zipFileName);
+});
+
 app.MapPost("/api/jobs/{jobId}/retry", async (string jobId, HttpRequest request, IRawClipService rawClipService, CancellationToken cancellationToken) =>
 {
     var userId = UserIdentityResolver.ResolveForRequest(request.HttpContext);
@@ -138,3 +224,153 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
+
+static bool TryNormalizeExportFormat(string? format, out string normalizedFormat, out string aspectLabel)
+{
+    normalizedFormat = (format ?? "vertical").Trim().ToLowerInvariant();
+    aspectLabel = normalizedFormat switch
+    {
+        "vertical" => "9x16",
+        "square" => "1x1",
+        _ => string.Empty
+    };
+
+    return normalizedFormat is "vertical" or "square";
+}
+
+static HashSet<int> ParseClipNumbers(string? clipNumbers)
+{
+    if (string.IsNullOrWhiteSpace(clipNumbers))
+        return new HashSet<int>();
+
+    return clipNumbers
+        .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+        .Select(part => int.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : -1)
+        .Where(n => n > 0)
+        .ToHashSet();
+}
+
+static string BuildSelectedZipFileName(string sourceFileName, string aspectLabel)
+{
+    var sourceBase = Path.GetFileNameWithoutExtension(sourceFileName);
+    var safeBase = MakeFileNameSafe(string.IsNullOrWhiteSpace(sourceBase) ? "clips" : sourceBase);
+    return $"{safeBase}-selected-{aspectLabel}.zip";
+}
+
+static string BuildExportFileName(string sourceFileName, int clipNumber, string aspectLabel)
+{
+    var sourceBase = Path.GetFileNameWithoutExtension(sourceFileName);
+    var safeBase = MakeFileNameSafe(string.IsNullOrWhiteSpace(sourceBase) ? "clip" : sourceBase);
+    return $"{safeBase}-clip-{clipNumber:D2}-{aspectLabel}.mp4";
+}
+
+static string MakeFileNameSafe(string value)
+{
+    var invalidChars = Path.GetInvalidFileNameChars();
+    var safeChars = value
+        .Select(ch => invalidChars.Contains(ch) ? '-' : ch)
+        .ToArray();
+    return new string(safeChars).Trim('-', '.', ' ');
+}
+
+static async Task<(bool Success, byte[] Content, string ErrorMessage)> BuildClipExportAsync(
+    RawClipJob job,
+    RawClip clip,
+    string format,
+    VideoProcessingOptions options,
+    IClipStorage storage,
+    CancellationToken cancellationToken)
+{
+    var extractedClipPath = storage.GetAbsolutePath(clip.BlobPath);
+    if (format == "vertical" && File.Exists(extractedClipPath))
+    {
+        var existingBytes = await File.ReadAllBytesAsync(extractedClipPath, cancellationToken);
+        return (true, existingBytes, string.Empty);
+    }
+
+    var ffmpegAvailable = await IsFfmpegAvailableAsync(options.FfmpegPath, cancellationToken);
+    if (!ffmpegAvailable)
+        return (false, Array.Empty<byte>(), "FFmpeg is required for this export format.");
+
+    var sourcePath = storage.GetAbsolutePath(job.SourceBlobPath);
+    if (!File.Exists(sourcePath))
+        return (false, Array.Empty<byte>(), "Source video file was not found.");
+
+    var tempFilePath = Path.Combine(Path.GetTempPath(), $"socialvideotor-export-{Guid.NewGuid():N}.mp4");
+    try
+    {
+        var useExtractedClipAsInput = File.Exists(extractedClipPath);
+        var inputPath = useExtractedClipAsInput ? extractedClipPath : sourcePath;
+        var filter = format == "square"
+            ? "scale=1080:1080:force_original_aspect_ratio=increase,crop=1080:1080"
+            : "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920";
+
+        var args = useExtractedClipAsInput
+            ? string.Format(CultureInfo.InvariantCulture,
+                "-y -i \"{0}\" -vf \"{1}\" -c:v libx264 -preset fast -crf 23 -movflags +faststart -c:a aac -b:a 128k \"{2}\"",
+                inputPath, filter, tempFilePath)
+            : string.Format(CultureInfo.InvariantCulture,
+                "-y -ss {0} -i \"{1}\" -t {2} -vf \"{3}\" -c:v libx264 -preset fast -crf 23 -movflags +faststart -c:a aac -b:a 128k \"{4}\"",
+                clip.StartTimeSeconds, inputPath, clip.DurationSeconds, filter, tempFilePath);
+
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo(options.FfmpegPath, args)
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            }
+        };
+
+        process.Start();
+        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(TimeSpan.FromSeconds(Math.Max(5, options.MediaToolTimeoutSeconds)));
+        await process.WaitForExitAsync(timeoutSource.Token);
+        _ = await outputTask;
+        var error = await errorTask;
+
+        if (process.ExitCode != 0 || !File.Exists(tempFilePath))
+            return (false, Array.Empty<byte>(), string.IsNullOrWhiteSpace(error) ? "Clip export failed." : error);
+
+        var bytes = await File.ReadAllBytesAsync(tempFilePath, cancellationToken);
+        return (true, bytes, string.Empty);
+    }
+    catch (OperationCanceledException)
+    {
+        return (false, Array.Empty<byte>(), "Clip export timed out.");
+    }
+    finally
+    {
+        if (File.Exists(tempFilePath))
+            File.Delete(tempFilePath);
+    }
+}
+
+static async Task<bool> IsFfmpegAvailableAsync(string ffmpegPath, CancellationToken cancellationToken)
+{
+    try
+    {
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo(ffmpegPath, "-version")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            }
+        };
+
+        process.Start();
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(TimeSpan.FromSeconds(5));
+        await process.WaitForExitAsync(timeoutSource.Token);
+        return process.ExitCode == 0;
+    }
+    catch
+    {
+        return false;
+    }
+}
