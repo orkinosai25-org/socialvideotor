@@ -70,10 +70,10 @@ else
                                         </div>
                                     </FluentStack>
                                     <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px; flex-wrap: wrap;">
-                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeStart(-TrimStepSeconds))">@($"Start -{TrimStepSeconds:0.##}s")</FluentButton>
-                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeStart(TrimStepSeconds))">@($"Start +{TrimStepSeconds:0.##}s")</FluentButton>
-                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeEnd(-TrimStepSeconds))">@($"End -{TrimStepSeconds:0.##}s")</FluentButton>
-                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeEnd(TrimStepSeconds))">@($"End +{TrimStepSeconds:0.##}s")</FluentButton>
+                                        <FluentButton Appearance="Appearance.Lightweight" aria-label="@($"Decrease clip start time by {TrimStepSeconds:0.##} seconds")" OnClick="@(() => NudgeStart(-TrimStepSeconds))">@($"Start -{TrimStepSeconds:0.##}s")</FluentButton>
+                                        <FluentButton Appearance="Appearance.Lightweight" aria-label="@($"Increase clip start time by {TrimStepSeconds:0.##} seconds")" OnClick="@(() => NudgeStart(TrimStepSeconds))">@($"Start +{TrimStepSeconds:0.##}s")</FluentButton>
+                                        <FluentButton Appearance="Appearance.Lightweight" aria-label="@($"Decrease clip end time by {TrimStepSeconds:0.##} seconds")" OnClick="@(() => NudgeEnd(-TrimStepSeconds))">@($"End -{TrimStepSeconds:0.##}s")</FluentButton>
+                                        <FluentButton Appearance="Appearance.Lightweight" aria-label="@($"Increase clip end time by {TrimStepSeconds:0.##} seconds")" OnClick="@(() => NudgeEnd(TrimStepSeconds))">@($"End +{TrimStepSeconds:0.##}s")</FluentButton>
                                     </FluentStack>
                                     <div>
                                         <FluentLabel>Description</FluentLabel>
@@ -156,9 +156,9 @@ else
 
         foreach (var clip in project.Clips)
         {
-            var startTime = Math.Min(clip.StartTime, clip.EndTime);
-            var endTime = Math.Max(clip.StartTime, clip.EndTime);
-            originalTrimBounds.TryAdd(clip.Id, (startTime, endTime));
+            var startTime = clip.StartTime;
+            var endTime = clip.EndTime >= clip.StartTime ? clip.EndTime : clip.StartTime;
+            originalTrimBounds[clip.Id] = (startTime, endTime);
         }
 
         RefreshClipSelection();
