@@ -139,7 +139,7 @@
                     <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="gap: 8px; flex-wrap: wrap;">
                         <FluentButton Appearance="Appearance.Outline" OnClick="@SelectAllClips">Select All</FluentButton>
                         <FluentButton Appearance="Appearance.Outline" OnClick="@ClearSelectedClips">Clear Selection</FluentButton>
-                        <a href="@GetSelectedDownloadUrl()" download="@GetSelectedZipFileName()" style="text-decoration: none;">
+                        <a href="@GetSelectedDownloadUrl()" download="@GetSelectedZipFileName()" style="text-decoration: none;" aria-disabled="@(!HasSelectedClips())">
                             <FluentButton Appearance="Appearance.Accent" Disabled="@(!HasSelectedClips())">
                                 <FluentIcon Value="@(new Icons.Regular.Size20.ArrowDownload())" Slot="start" />
                                 Download Selected (@GetSelectedClipCount())
@@ -147,6 +147,9 @@
                         </a>
                     </FluentStack>
                 </FluentStack>
+                <span style="font-size: 0.8rem; color: var(--neutral-foreground-hint);">
+                    Batch export is all-or-nothing. If one selected clip fails to export, no ZIP is returned.
+                </span>
 
                 <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px;">
                     @foreach (var clip in currentJob.Clips)
@@ -414,7 +417,7 @@
 
     private string GetSelectedDownloadUrl()
     {
-        if (currentJob == null) return string.Empty;
+        if (currentJob == null || !HasSelectedClips()) return string.Empty;
         return $"/api/jobs/{currentJob.Id}/export?format={exportFormat}&clipNumbers={GetSelectedClipNumbersCsv()}";
     }
 

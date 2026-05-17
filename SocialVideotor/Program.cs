@@ -10,6 +10,7 @@ using System.IO.Compression;
 var builder = WebApplication.CreateBuilder(args);
 const int MinimumFfmpegTimeoutSeconds = 5;
 const int ExportTimeoutMultiplier = 2;
+const int MaxBatchExportClipCount = 25;
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents()
@@ -140,6 +141,7 @@ app.MapGet("/api/jobs/{jobId}/clips/{clipNumber:int}/export", async (
     IRawClipService rawClipService,
     IClipStorage storage,
     IOptions<VideoProcessingOptions> options,
+    ILogger<Program> logger,
     CancellationToken cancellationToken) =>
 {
     if (!safeJobIdPattern.IsMatch(jobId)) return Results.BadRequest();
@@ -157,11 +159,23 @@ app.MapGet("/api/jobs/{jobId}/clips/{clipNumber:int}/export", async (
     if (!TryNormalizeExportFormat(format, out var normalizedFormat, out var aspectLabel))
         return Results.BadRequest("Unsupported format. Use 'vertical' or 'square'.");
 
-    var export = await BuildClipExportAsync(job, clip, normalizedFormat, options.Value, storage, cancellationToken);
+    var export = await PrepareClipExportFileAsync(job, clip, normalizedFormat, options.Value, storage, logger, cancellationToken);
     if (!export.Success) return Results.BadRequest(export.ErrorMessage);
 
     var fileName = BuildExportFileName(job.SourceFileName, clip.ClipNumber, aspectLabel);
-    return Results.File(export.Content, "video/mp4", fileName);
+    return Results.Stream(async (outputStream) =>
+    {
+        try
+        {
+            await using var input = File.OpenRead(export.FilePath!);
+            await input.CopyToAsync(outputStream, cancellationToken);
+        }
+        finally
+        {
+            if (export.DeleteAfterSend && File.Exists(export.FilePath))
+                File.Delete(export.FilePath);
+        }
+    }, "video/mp4", fileName);
 });
 
 app.MapGet("/api/jobs/{jobId}/export", async (
@@ -172,6 +186,7 @@ app.MapGet("/api/jobs/{jobId}/export", async (
     IRawClipService rawClipService,
     IClipStorage storage,
     IOptions<VideoProcessingOptions> options,
+    ILogger<Program> logger,
     CancellationToken cancellationToken) =>
 {
     if (!safeJobIdPattern.IsMatch(jobId)) return Results.BadRequest();
@@ -185,33 +200,69 @@ app.MapGet("/api/jobs/{jobId}/export", async (
     if (!TryNormalizeExportFormat(format, out var normalizedFormat, out var aspectLabel))
         return Results.BadRequest("Unsupported format. Use 'vertical' or 'square'.");
 
-    var selectedClipNumbers = ParseClipNumbers(clipNumbers);
-    if (!selectedClipNumbers.Any())
-        return Results.BadRequest("Select at least one clip.");
+    var clipNumberParseResult = ParseClipNumbers(clipNumbers);
+    if (!clipNumberParseResult.IsValid)
+        return Results.BadRequest(clipNumberParseResult.ErrorMessage);
+
+    if (clipNumberParseResult.ClipNumbers.Count > MaxBatchExportClipCount)
+        return Results.BadRequest($"Maximum {MaxBatchExportClipCount} clips can be exported per request.");
+
+    var jobClipNumbers = job.Clips.Select(c => c.ClipNumber).ToHashSet();
+    var outOfRangeClipNumbers = clipNumberParseResult.ClipNumbers.Where(number => !jobClipNumbers.Contains(number)).ToList();
+    if (outOfRangeClipNumbers.Count > 0)
+    {
+        return Results.BadRequest($"Clip number(s) not found for this job: {string.Join(", ", outOfRangeClipNumbers)}.");
+    }
 
     var clips = job.Clips
-        .Where(c => selectedClipNumbers.Contains(c.ClipNumber))
+        .Where(c => clipNumberParseResult.ClipNumbers.Contains(c.ClipNumber))
         .OrderBy(c => c.ClipNumber)
         .ToList();
-    if (!clips.Any()) return Results.BadRequest("No matching clips.");
+    if (!clips.Any()) return Results.BadRequest("Select at least one clip.");
 
-    await using var zipStream = new MemoryStream();
-    using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Create, leaveOpen: true))
+    var preparedExports = new List<(RawClip Clip, string FilePath, bool DeleteAfterSend)>();
+    foreach (var clip in clips)
     {
-        foreach (var clip in clips)
+        cancellationToken.ThrowIfCancellationRequested();
+        var export = await PrepareClipExportFileAsync(job, clip, normalizedFormat, options.Value, storage, logger, cancellationToken);
+        if (!export.Success)
         {
-            var export = await BuildClipExportAsync(job, clip, normalizedFormat, options.Value, storage, cancellationToken);
-            if (!export.Success) return Results.BadRequest(export.ErrorMessage);
-
-            var fileName = BuildExportFileName(job.SourceFileName, clip.ClipNumber, aspectLabel);
-            var entry = archive.CreateEntry(fileName, CompressionLevel.Fastest);
-            await using var entryStream = entry.Open();
-            await entryStream.WriteAsync(export.Content, cancellationToken);
+            foreach (var prepared in preparedExports.Where(e => e.DeleteAfterSend))
+            {
+                if (File.Exists(prepared.FilePath))
+                    File.Delete(prepared.FilePath);
+            }
+            return Results.BadRequest(export.ErrorMessage);
         }
+
+        preparedExports.Add((clip, export.FilePath!, export.DeleteAfterSend));
     }
 
     var zipFileName = BuildSelectedZipFileName(job.SourceFileName, aspectLabel);
-    return Results.File(zipStream.ToArray(), "application/zip", zipFileName);
+    return Results.Stream(async (outputStream) =>
+    {
+        try
+        {
+            using var archive = new ZipArchive(outputStream, ZipArchiveMode.Create, leaveOpen: true);
+            foreach (var prepared in preparedExports)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var fileName = BuildExportFileName(job.SourceFileName, prepared.Clip.ClipNumber, aspectLabel);
+                var entry = archive.CreateEntry(fileName, CompressionLevel.Fastest);
+                await using var entryStream = entry.Open();
+                await using var input = File.OpenRead(prepared.FilePath);
+                await input.CopyToAsync(entryStream, cancellationToken);
+            }
+        }
+        finally
+        {
+            foreach (var prepared in preparedExports.Where(e => e.DeleteAfterSend))
+            {
+                if (File.Exists(prepared.FilePath))
+                    File.Delete(prepared.FilePath);
+            }
+        }
+    }, "application/zip", zipFileName);
 });
 
 app.MapPost("/api/jobs/{jobId}/retry", async (string jobId, HttpRequest request, IRawClipService rawClipService, CancellationToken cancellationToken) =>
@@ -240,16 +291,28 @@ static bool TryNormalizeExportFormat(string? format, out string normalizedFormat
     return normalizedFormat is "vertical" or "square";
 }
 
-static HashSet<int> ParseClipNumbers(string? clipNumbers)
+static (bool IsValid, HashSet<int> ClipNumbers, string ErrorMessage) ParseClipNumbers(string? clipNumbers)
 {
     if (string.IsNullOrWhiteSpace(clipNumbers))
-        return new HashSet<int>();
+        return (false, new HashSet<int>(), "Select at least one clip.");
 
-    return clipNumbers
-        .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-        .Select(part => int.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : -1)
-        .Where(n => n > 0)
-        .ToHashSet();
+    var parsedClipNumbers = new HashSet<int>();
+    var parts = clipNumbers.Split(',', StringSplitOptions.TrimEntries);
+    if (parts.Length == 0)
+        return (false, new HashSet<int>(), "Select at least one clip.");
+
+    foreach (var part in parts)
+    {
+        if (string.IsNullOrWhiteSpace(part))
+            return (false, new HashSet<int>(), "Invalid clip number list. Use comma-separated positive integers like 1,2,3.");
+        if (!int.TryParse(part, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) || parsed <= 0)
+            return (false, new HashSet<int>(), $"Invalid clip number '{part}'. Use positive integers like 1,2,3.");
+        parsedClipNumbers.Add(parsed);
+    }
+
+    return parsedClipNumbers.Count == 0
+        ? (false, new HashSet<int>(), "Select at least one clip.")
+        : (true, parsedClipNumbers, string.Empty);
 }
 
 static string BuildSelectedZipFileName(string sourceFileName, string aspectLabel)
@@ -275,30 +338,34 @@ static string MakeFileNameSafe(string value)
     return new string(safeChars).Trim('-', '.', ' ');
 }
 
-static async Task<(bool Success, byte[] Content, string ErrorMessage)> BuildClipExportAsync(
+static async Task<(bool Success, string? FilePath, bool DeleteAfterSend, string ErrorMessage)> PrepareClipExportFileAsync(
     RawClipJob job,
     RawClip clip,
     string format,
     VideoProcessingOptions options,
     IClipStorage storage,
+    ILogger logger,
     CancellationToken cancellationToken)
 {
     var extractedClipPath = storage.GetAbsolutePath(clip.BlobPath);
     if (format == "vertical" && File.Exists(extractedClipPath))
     {
-        var existingBytes = await File.ReadAllBytesAsync(extractedClipPath, cancellationToken);
-        return (true, existingBytes, string.Empty);
+        return (true, extractedClipPath, false, string.Empty);
     }
 
     var ffmpegAvailable = await IsFfmpegAvailableAsync(options.FfmpegPath, cancellationToken);
     if (!ffmpegAvailable)
-        return (false, Array.Empty<byte>(), "FFmpeg is required for this export format.");
+    {
+        logger.LogWarning("Export failed because FFmpeg is unavailable. Job={JobId} Clip={ClipNumber} Format={Format}", job.Id, clip.ClipNumber, format);
+        return (false, null, false, "FFmpeg is required for this export format.");
+    }
 
     var sourcePath = storage.GetAbsolutePath(job.SourceBlobPath);
     if (!File.Exists(sourcePath))
-        return (false, Array.Empty<byte>(), "Source video file was not found.");
+        return (false, null, false, "Source video file was not found.");
 
     var tempFilePath = Path.Combine(Path.GetTempPath(), $"socialvideotor-export-{Guid.NewGuid():N}.mp4");
+    var keepTempFileForCaller = false;
     try
     {
         var useExtractedClipAsInput = File.Exists(extractedClipPath);
@@ -337,18 +404,23 @@ static async Task<(bool Success, byte[] Content, string ErrorMessage)> BuildClip
         var error = await errorTask;
 
         if (process.ExitCode != 0 || !File.Exists(tempFilePath))
-            return (false, Array.Empty<byte>(), string.IsNullOrWhiteSpace(error) ? "Clip export failed." : error);
+        {
+            logger.LogWarning("FFmpeg export failed. Job={JobId} Clip={ClipNumber} Format={Format} ExitCode={ExitCode} Error={Error}",
+                job.Id, clip.ClipNumber, format, process.ExitCode, TrimForLog(error));
+            return (false, null, false, "Clip export failed.");
+        }
 
-        var bytes = await File.ReadAllBytesAsync(tempFilePath, cancellationToken);
-        return (true, bytes, string.Empty);
+        keepTempFileForCaller = true;
+        return (true, tempFilePath, true, string.Empty);
     }
     catch (OperationCanceledException)
     {
-        return (false, Array.Empty<byte>(), "Clip export timed out.");
+        logger.LogWarning("FFmpeg export timed out/cancelled. Job={JobId} Clip={ClipNumber} Format={Format}", job.Id, clip.ClipNumber, format);
+        return (false, null, false, "Clip export timed out.");
     }
     finally
     {
-        if (File.Exists(tempFilePath))
+        if (!keepTempFileForCaller && File.Exists(tempFilePath))
             File.Delete(tempFilePath);
     }
 }
@@ -378,4 +450,13 @@ static async Task<bool> IsFfmpegAvailableAsync(string ffmpegPath, CancellationTo
     {
         return false;
     }
+}
+
+static string TrimForLog(string value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+        return string.Empty;
+
+    const int maxErrorLogLength = 500;
+    return value.Length <= maxErrorLogLength ? value : value[..maxErrorLogLength] + "...";
 }
