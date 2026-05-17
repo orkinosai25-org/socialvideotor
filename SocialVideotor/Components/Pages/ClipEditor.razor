@@ -70,10 +70,10 @@ else
                                         </div>
                                     </FluentStack>
                                     <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px; flex-wrap: wrap;">
-                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeStart(-TrimStepSeconds))">Start -0.5s</FluentButton>
-                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeStart(TrimStepSeconds))">Start +0.5s</FluentButton>
-                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeEnd(-TrimStepSeconds))">End -0.5s</FluentButton>
-                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeEnd(TrimStepSeconds))">End +0.5s</FluentButton>
+                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeStart(-TrimStepSeconds))">@($"Start -{TrimStepSeconds:0.##}s")</FluentButton>
+                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeStart(TrimStepSeconds))">@($"Start +{TrimStepSeconds:0.##}s")</FluentButton>
+                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeEnd(-TrimStepSeconds))">@($"End -{TrimStepSeconds:0.##}s")</FluentButton>
+                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => NudgeEnd(TrimStepSeconds))">@($"End +{TrimStepSeconds:0.##}s")</FluentButton>
                                     </FluentStack>
                                     <div>
                                         <FluentLabel>Description</FluentLabel>
@@ -142,15 +142,15 @@ else
         project = ProjectService.GetProject(ProjectId);
         if (project != null)
         {
-            originalTrimBounds.Clear();
             foreach (var clip in project.Clips)
             {
-                originalTrimBounds[clip.Id] = (clip.StartTime, clip.EndTime);
+                if (!originalTrimBounds.ContainsKey(clip.Id))
+                {
+                    originalTrimBounds[clip.Id] = (clip.StartTime, clip.EndTime);
+                }
             }
 
-            selectedClips = project.Clips.Where(c => c.IsSelected).ToList();
-            if (!selectedClips.Any()) selectedClips = project.Clips.ToList();
-            selectedClip = CreateEditableClip(selectedClips.FirstOrDefault());
+            RefreshClipSelection();
         }
     }
 
@@ -192,15 +192,13 @@ else
         project = ProjectService.GetProject(ProjectId);
         if (project == null) return;
 
-        selectedClips = project.Clips.Where(c => c.IsSelected).ToList();
-        if (!selectedClips.Any()) selectedClips = project.Clips.ToList();
-        selectedClip = CreateEditableClip(selectedClips.FirstOrDefault(c => c.Id == selectedClip.Id));
+        RefreshClipSelection(selectedClip.Id);
     }
 
     private void ResetTrimToOriginal()
     {
         if (selectedClip == null) return;
-        var originalBounds = GetOriginalTrimBounds(selectedClip.Id);
+        var originalBounds = GetOriginalTrimBounds(selectedClip);
         selectedClip.StartTime = originalBounds.StartTime;
         selectedClip.EndTime = originalBounds.EndTime;
         StateHasChanged();
@@ -232,7 +230,7 @@ else
     {
         if (selectedClip == null) return;
 
-        var originalBounds = GetOriginalTrimBounds(selectedClip.Id);
+        var originalBounds = GetOriginalTrimBounds(selectedClip);
         var maxDuration = Math.Max(0, originalBounds.EndTime - originalBounds.StartTime);
         var minimumDuration = Math.Min(MinimumTrimDurationSeconds, maxDuration);
         var maxStart = originalBounds.EndTime - minimumDuration;
@@ -241,10 +239,29 @@ else
         selectedClip.EndTime = Math.Clamp(selectedClip.EndTime, selectedClip.StartTime + minimumDuration, originalBounds.EndTime);
     }
 
-    private (double StartTime, double EndTime) GetOriginalTrimBounds(string clipId)
+    private void RefreshClipSelection(string? preferredClipId = null)
     {
-        if (originalTrimBounds.TryGetValue(clipId, out var bounds)) return bounds;
-        return (0, double.MaxValue);
+        if (project == null)
+        {
+            selectedClips = new();
+            selectedClip = null;
+            return;
+        }
+
+        selectedClips = project.Clips.Where(c => c.IsSelected).ToList();
+        if (!selectedClips.Any()) selectedClips = project.Clips.ToList();
+
+        var targetClip = preferredClipId == null
+            ? selectedClips.FirstOrDefault()
+            : selectedClips.FirstOrDefault(c => c.Id == preferredClipId) ?? selectedClips.FirstOrDefault();
+
+        selectedClip = CreateEditableClip(targetClip);
+    }
+
+    private (double StartTime, double EndTime) GetOriginalTrimBounds(VideoClip clip)
+    {
+        if (originalTrimBounds.TryGetValue(clip.Id, out var bounds)) return bounds;
+        return (clip.StartTime, clip.EndTime);
     }
 
     private static VideoClip? CreateEditableClip(VideoClip? clip)
