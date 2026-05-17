@@ -133,25 +133,35 @@ else
     private VideoProject? project;
     private List<VideoClip> selectedClips = new();
     private VideoClip? selectedClip;
+    private string? loadedProjectId;
     private readonly Dictionary<string, (double StartTime, double EndTime)> originalTrimBounds = new();
     private const double TrimStepSeconds = 0.5;
     private const double MinimumTrimDurationSeconds = 0.1;
 
-    protected override void OnInitialized()
-    {
-        project = ProjectService.GetProject(ProjectId);
-        if (project != null)
-        {
-            foreach (var clip in project.Clips)
-            {
-                if (!originalTrimBounds.ContainsKey(clip.Id))
-                {
-                    originalTrimBounds[clip.Id] = (clip.StartTime, clip.EndTime);
-                }
-            }
+    protected override void OnInitialized() => LoadProject();
 
-            RefreshClipSelection();
+    protected override void OnParametersSet()
+    {
+        if (loadedProjectId == ProjectId) return;
+        LoadProject();
+    }
+
+    private void LoadProject()
+    {
+        loadedProjectId = ProjectId;
+        project = ProjectService.GetProject(ProjectId);
+        originalTrimBounds.Clear();
+
+        if (project == null) return;
+
+        foreach (var clip in project.Clips)
+        {
+            var startTime = Math.Min(clip.StartTime, clip.EndTime);
+            var endTime = Math.Max(clip.StartTime, clip.EndTime);
+            originalTrimBounds.TryAdd(clip.Id, (startTime, endTime));
         }
+
+        RefreshClipSelection();
     }
 
     private void SelectClip(VideoClip clip) => selectedClip = CreateEditableClip(clip);
