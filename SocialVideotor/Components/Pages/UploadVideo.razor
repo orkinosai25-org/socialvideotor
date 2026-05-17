@@ -217,7 +217,7 @@
     private string errorMessage = string.Empty;
     private Timer? pollingTimer;
     private int _pollInProgress; // 0 = idle, 1 = executing; prevents overlapping callbacks
-    private readonly HashSet<string> selectedClipIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> selectedClipIds = new(StringComparer.Ordinal);
     private string exportFormat = "vertical";
 
     private void OnFileSelected(InputFileChangeEventArgs e)
@@ -362,7 +362,7 @@
     {
         if (currentJob == null) return;
 
-        var validIds = currentJob.Clips.Select(c => c.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var validIds = currentJob.Clips.Select(c => c.Id).ToHashSet(StringComparer.Ordinal);
         selectedClipIds.RemoveWhere(id => !validIds.Contains(id));
 
         if (selectedClipIds.Count == 0)

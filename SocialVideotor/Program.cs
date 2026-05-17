@@ -321,7 +321,8 @@ static async Task<(bool Success, byte[] Content, string ErrorMessage)> BuildClip
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
-                UseShellExecute = false
+                UseShellExecute = false,
+                CreateNoWindow = true
             }
         };
 
@@ -362,7 +363,8 @@ static async Task<bool> IsFfmpegAvailableAsync(string ffmpegPath, CancellationTo
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
-                UseShellExecute = false
+                UseShellExecute = false,
+                CreateNoWindow = true
             }
         };
 
