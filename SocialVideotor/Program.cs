@@ -8,6 +8,8 @@ using System.Globalization;
 using System.IO.Compression;
 
 var builder = WebApplication.CreateBuilder(args);
+const int MinimumFfmpegTimeoutSeconds = 5;
+const int ExportTimeoutMultiplier = 2;
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents()
@@ -327,7 +329,8 @@ static async Task<(bool Success, byte[] Content, string ErrorMessage)> BuildClip
         var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
         using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutSource.CancelAfter(TimeSpan.FromSeconds(Math.Max(5, options.MediaToolTimeoutSeconds)));
+        var exportTimeoutSeconds = Math.Max(MinimumFfmpegTimeoutSeconds, options.MediaToolTimeoutSeconds) * ExportTimeoutMultiplier;
+        timeoutSource.CancelAfter(TimeSpan.FromSeconds(exportTimeoutSeconds));
         await process.WaitForExitAsync(timeoutSource.Token);
         _ = await outputTask;
         var error = await errorTask;
@@ -365,7 +368,7 @@ static async Task<bool> IsFfmpegAvailableAsync(string ffmpegPath, CancellationTo
 
         process.Start();
         using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutSource.CancelAfter(TimeSpan.FromSeconds(5));
+        timeoutSource.CancelAfter(TimeSpan.FromSeconds(MinimumFfmpegTimeoutSeconds));
         await process.WaitForExitAsync(timeoutSource.Token);
         return process.ExitCode == 0;
     }
