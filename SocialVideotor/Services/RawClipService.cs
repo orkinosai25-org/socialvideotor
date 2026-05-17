@@ -12,6 +12,12 @@ public class RawClipService : IRawClipService, IDisposable
     {
         ".mp4", ".mov", ".m4v"
     };
+    private static readonly JsonSerializerOptions PersistedJobSerializerOptions = new()
+    {
+        WriteIndented = true
+    };
+    private const int MinProcessTimeoutSeconds = 5;
+    private const int MaxErrorLogLength = 500;
 
     private readonly IClipStorage _storage;
     private readonly ILogger<RawClipService> _logger;
@@ -40,9 +46,9 @@ public class RawClipService : IRawClipService, IDisposable
         _cleanupTimer = new Timer(_ => CleanupExpiredJobs(), null, TimeSpan.Zero, TimeSpan.FromHours(1));
     }
 
-    public async Task<RawClipJob> StartProcessingAsync(Stream videoStream, string filename, long fileSize, string userId = "anonymous", CancellationToken cancellationToken = default)
+    public async Task<RawClipJob> StartProcessingAsync(Stream videoStream, string filename, long fileSize, string? contentType = null, string userId = "anonymous", CancellationToken cancellationToken = default)
     {
-        ValidateUpload(filename, fileSize);
+        ValidateUpload(filename, fileSize, contentType);
 
         var jobId = Guid.NewGuid().ToString("D");
 
@@ -80,7 +86,7 @@ public class RawClipService : IRawClipService, IDisposable
 
         var sourcePath = _storage.GetAbsolutePath(job.SourceBlobPath);
         Directory.CreateDirectory(Path.GetDirectoryName(sourcePath)!);
-        await SaveFileAsync(job, videoStream, sourcePath, fileSize, cancellationToken);
+        await SaveFileAsync(job, videoStream, sourcePath, fileSize, _options.Value.MaxUploadSizeBytes, cancellationToken);
 
         UpdateJob(job, j =>
         {
@@ -332,7 +338,13 @@ public class RawClipService : IRawClipService, IDisposable
         }
     }
 
-    private static async Task SaveFileAsync(RawClipJob job, Stream source, string destPath, long totalSize, CancellationToken cancellationToken = default)
+    private static async Task SaveFileAsync(
+        RawClipJob job,
+        Stream source,
+        string destPath,
+        long totalSize,
+        long maxUploadSizeBytes,
+        CancellationToken cancellationToken = default)
     {
         const int bufferSize = 81920;
         await using var dest = File.Create(destPath);
@@ -345,13 +357,19 @@ public class RawClipService : IRawClipService, IDisposable
             await dest.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
             written += read;
 
+            if (written > maxUploadSizeBytes)
+                throw new InvalidOperationException($"File exceeds the configured max size of {maxUploadSizeBytes} bytes.");
+
             if (totalSize <= 0) continue;
             var pct = (int)Math.Clamp((double)written / totalSize * 95, 0, 95);
             lock (job)
             {
-                job.ProgressPercent = pct;
-                job.StatusMessage = $"Uploading… {pct}%";
-                job.UpdatedAtUtc = DateTime.UtcNow;
+                if (pct != job.ProgressPercent)
+                {
+                    job.ProgressPercent = pct;
+                    job.StatusMessage = $"Uploading… {pct}%";
+                    job.UpdatedAtUtc = DateTime.UtcNow;
+                }
             }
         }
     }
@@ -379,8 +397,23 @@ public class RawClipService : IRawClipService, IDisposable
             };
 
             process.Start();
-            var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken);
+            var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            var exitCode = await WaitForProcessExitAsync(process, _options.Value.MediaToolTimeoutSeconds, cancellationToken);
+            if (exitCode == null)
+            {
+                _logger.LogWarning("ffprobe timed out after {TimeoutSeconds}s for {VideoPath}", _options.Value.MediaToolTimeoutSeconds, videoPath);
+                return 0;
+            }
+
+            var output = await outputTask;
+            var error = await errorTask;
+            if (exitCode != 0)
+            {
+                _logger.LogWarning("ffprobe failed for {VideoPath}. ExitCode={ExitCode}. Error={Error}", videoPath, exitCode, TrimForLog(error));
+                return 0;
+            }
+
             return double.TryParse(output.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var d) ? d : 0;
         }
         catch (Exception ex)
@@ -413,8 +446,24 @@ public class RawClipService : IRawClipService, IDisposable
             };
 
             process.Start();
-            await process.WaitForExitAsync(cancellationToken);
-            return process.ExitCode == 0 && File.Exists(outputPath);
+            var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            var exitCode = await WaitForProcessExitAsync(process, _options.Value.MediaToolTimeoutSeconds, cancellationToken);
+            _ = await outputTask;
+            var error = await errorTask;
+            if (exitCode == null)
+            {
+                _logger.LogWarning("ffmpeg clip extraction timed out after {TimeoutSeconds}s for {Output}", _options.Value.MediaToolTimeoutSeconds, outputPath);
+                return false;
+            }
+
+            if (exitCode != 0)
+            {
+                _logger.LogWarning("ffmpeg clip extraction failed for {Output}. ExitCode={ExitCode}. Error={Error}", outputPath, exitCode, TrimForLog(error));
+                return false;
+            }
+
+            return File.Exists(outputPath);
         }
         catch (Exception ex)
         {
@@ -447,11 +496,14 @@ public class RawClipService : IRawClipService, IDisposable
         }
     }
 
-    private void ValidateUpload(string filename, long fileSize)
+    private void ValidateUpload(string filename, long fileSize, string? contentType)
     {
         var extension = Path.GetExtension(filename);
         if (string.IsNullOrWhiteSpace(extension) || !SupportedExtensions.Contains(extension))
             throw new InvalidOperationException("Unsupported file type. Allowed: .mp4, .mov, .m4v");
+
+        if (!string.IsNullOrWhiteSpace(contentType) && !UserIdentityResolver.SupportedUploadContentTypes.Contains(contentType))
+            throw new InvalidOperationException("Unsupported content type. Allowed: video/mp4, video/quicktime, video/x-m4v.");
 
         if (fileSize <= 0)
             throw new InvalidOperationException("The uploaded file is empty.");
@@ -541,10 +593,7 @@ public class RawClipService : IRawClipService, IDisposable
 
     private void SaveJobsUnsafe()
     {
-        var json = JsonSerializer.Serialize(_jobs.Values.OrderBy(j => j.CreatedAtUtc).ToList(), new JsonSerializerOptions
-        {
-            WriteIndented = true
-        });
+        var json = JsonSerializer.Serialize(_jobs.Values.OrderBy(j => j.CreatedAtUtc).ToList(), PersistedJobSerializerOptions);
 
         var tempPath = _jobsStatePath + ".tmp";
         File.WriteAllText(tempPath, json);
@@ -599,5 +648,42 @@ public class RawClipService : IRawClipService, IDisposable
             PurposeLabel = clip.PurposeLabel,
             CreatedAtUtc = clip.CreatedAtUtc
         };
+    }
+
+    private static async Task<int?> WaitForProcessExitAsync(Process process, int timeoutSeconds, CancellationToken cancellationToken)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(Math.Max(MinProcessTimeoutSeconds, timeoutSeconds)));
+        try
+        {
+            await process.WaitForExitAsync(timeoutCts.Token);
+            return process.ExitCode;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            TryKill(process);
+            return null;
+        }
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+        }
+        catch
+        {
+            // best-effort cleanup
+        }
+    }
+
+    private static string TrimForLog(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        return value.Length <= MaxErrorLogLength ? value : value[..MaxErrorLogLength] + "...";
     }
 }

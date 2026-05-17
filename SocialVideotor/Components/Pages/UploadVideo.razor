@@ -2,6 +2,7 @@
 @using SocialVideotor.Models
 @using SocialVideotor.Services
 @inject IRawClipService RawClipService
+@inject IHttpContextAccessor HttpContextAccessor
 @inject NavigationManager NavigationManager
 @rendermode InteractiveServer
 @implements IDisposable
@@ -215,7 +216,12 @@
         try
         {
             await using var stream = selectedFile.OpenReadStream(maxAllowedSize: maxSize);
-            currentJob = await RawClipService.StartProcessingAsync(stream, selectedFile.Name, selectedFile.Size);
+            currentJob = await RawClipService.StartProcessingAsync(
+                stream,
+                selectedFile.Name,
+                selectedFile.Size,
+                selectedFile.ContentType,
+                GetCurrentUserId());
             StartPolling();
         }
         catch (Exception ex)
@@ -236,6 +242,17 @@
                 if (currentJob == null) return;
                 var job = RawClipService.GetJob(currentJob.Id);
                 if (job == null) return;
+                if (!string.Equals(job.UserId, GetCurrentUserId(), StringComparison.OrdinalIgnoreCase))
+                {
+                    await InvokeAsync(() =>
+                    {
+                        errorMessage = "Job is not accessible for the current user.";
+                        StopPolling();
+                        phase = Phase.Idle;
+                        StateHasChanged();
+                    });
+                    return;
+                }
 
                 await InvokeAsync(() =>
                 {
@@ -289,7 +306,7 @@
     private async Task Retry()
     {
         if (currentJob == null) return;
-        var retried = await RawClipService.RetryJobAsync(currentJob.Id);
+        var retried = await RawClipService.RetryJobAsync(currentJob.Id, GetCurrentUserId());
         if (!retried)
         {
             errorMessage = "Retry failed. Please upload again.";
@@ -304,6 +321,11 @@
     private void GoBack() => NavigationManager.NavigateTo("/");
 
     public void Dispose() => StopPolling();
+
+    private string GetCurrentUserId()
+    {
+        return UserIdentityResolver.ResolveFromContextOrFallback(HttpContextAccessor.HttpContext);
+    }
 
     // ── Formatting helpers ──────────────────────────────────────────────────
 

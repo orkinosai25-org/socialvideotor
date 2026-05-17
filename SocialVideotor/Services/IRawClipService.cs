@@ -4,7 +4,7 @@ namespace SocialVideotor.Services;
 
 public interface IRawClipService
 {
-    Task<RawClipJob> StartProcessingAsync(Stream videoStream, string filename, long fileSize, string userId = "anonymous", CancellationToken cancellationToken = default);
+    Task<RawClipJob> StartProcessingAsync(Stream videoStream, string filename, long fileSize, string? contentType = null, string userId = "anonymous", CancellationToken cancellationToken = default);
     RawClipJob? GetJob(string jobId);
     IEnumerable<RawClipJob> GetAllJobs(string? userId = null);
     IEnumerable<RawClip> GetClips(string jobId, string? userId = null);

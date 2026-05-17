@@ -3,6 +3,7 @@
 @using SocialVideotor.Services
 @inject IProjectService ProjectService
 @inject IRawClipService RawClipService
+@inject IHttpContextAccessor HttpContextAccessor
 @inject NavigationManager NavigationManager
 @rendermode InteractiveServer
 
@@ -130,7 +131,7 @@
     private void LoadProjects()
     {
         projects = ProjectService.GetAllProjects().ToList();
-        rawClipJobs = RawClipService.GetAllJobs().Take(MaxVisibleRawClipJobs).ToList();
+        rawClipJobs = RawClipService.GetAllJobs(GetCurrentUserId()).Take(MaxVisibleRawClipJobs).ToList();
     }
 
     private void CreateNewProject()
@@ -182,5 +183,10 @@
     {
         var ts = TimeSpan.FromSeconds(seconds);
         return ts.TotalHours >= 1 ? $"{(int)ts.TotalHours}h {ts.Minutes}m" : $"{ts.Minutes}m {ts.Seconds}s";
+    }
+
+    private string GetCurrentUserId()
+    {
+        return UserIdentityResolver.ResolveFromContextOrFallback(HttpContextAccessor.HttpContext);
     }
 }
