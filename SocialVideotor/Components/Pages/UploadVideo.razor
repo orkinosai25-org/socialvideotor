@@ -105,16 +105,16 @@
             <FluentStack Orientation="Orientation.Vertical" Style="gap: 16px;">
                 <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="justify-content: space-between;">
                     <h3 style="margin: 0;">
-                        🎬 @currentJob.Clips.Count Clips — @currentJob.OriginalFilename
+                        🎬 @currentJob.Clips.Count Clips — @currentJob.SourceFileName
                         <span style="font-weight: 400; font-size: 0.85rem; color: var(--neutral-foreground-hint);">
-                            (source: @FormatDuration(currentJob.VideoDuration))
+                            (source: @FormatDuration(currentJob.VideoDurationSeconds))
                         </span>
                     </h3>
                     <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px;">
                         <span style="font-size: 0.8rem; color: var(--neutral-foreground-hint); align-self: center;"
                               aria-label="Auto-deletion time">
                             <FluentIcon Value="@(new Icons.Regular.Size16.Timer())" />
-                            Auto-deletes @currentJob.ExpiresAt.ToLocalTime().ToString("MMM d, h:mm tt")
+                            Auto-deletes @currentJob.ExpiresAtUtc.ToLocalTime().ToString("MMM d, h:mm tt")
                         </span>
                         <FluentButton Appearance="Appearance.Outline" OnClick="@DeleteJob">
                             <FluentIcon Value="@(new Icons.Regular.Size20.Delete())" Slot="start" />
@@ -142,10 +142,10 @@
                                 <FluentStack Orientation="Orientation.Vertical" Style="gap: 8px; padding: 12px;">
                                     <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="justify-content: space-between;">
                                         <span style="font-weight: 600;">Clip @clip.ClipNumber</span>
-                                        <FluentBadge Appearance="Appearance.Accent">@FormatDuration(clip.Duration)</FluentBadge>
+                                        <FluentBadge Appearance="Appearance.Accent">@FormatDuration(clip.DurationSeconds)</FluentBadge>
                                     </FluentStack>
                                     <span style="font-size: 0.8rem; color: var(--neutral-foreground-hint);">
-                                        @FormatTime(clip.StartTime) – @FormatTime(clip.EndTime)
+                                        @FormatTime(clip.StartTimeSeconds) – @FormatTime(clip.EndTimeSeconds)
                                     </span>
                                     <a href="@clip.DownloadUrl" download style="text-decoration: none;">
                                         <FluentButton Appearance="Appearance.Outline" Style="width: 100%;">
@@ -171,7 +171,10 @@
                     <h3 style="margin: 0;">Processing Failed</h3>
                     <p style="margin: 8px 0 0 0; color: var(--neutral-foreground-hint);">@currentJob?.ErrorMessage</p>
                 </div>
-                <FluentButton Appearance="Appearance.Accent" OnClick="@Reset">Try Again</FluentButton>
+                <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px;">
+                    <FluentButton Appearance="Appearance.Accent" OnClick="@Retry">Retry</FluentButton>
+                    <FluentButton Appearance="Appearance.Outline" OnClick="@Reset">Reset</FluentButton>
+                </FluentStack>
             </FluentStack>
         </FluentCard>
     }
@@ -240,6 +243,7 @@
                     phase = job.Status switch
                     {
                         RawClipJobStatus.Uploading => Phase.Uploading,
+                        RawClipJobStatus.Queued => Phase.Processing,
                         RawClipJobStatus.Processing => Phase.Processing,
                         RawClipJobStatus.Ready => Phase.Done,
                         RawClipJobStatus.Failed => Phase.Failed,
@@ -280,6 +284,21 @@
         if (currentJob == null) return;
         RawClipService.DeleteJob(currentJob.Id);
         Reset();
+    }
+
+    private async Task Retry()
+    {
+        if (currentJob == null) return;
+        var retried = await RawClipService.RetryJobAsync(currentJob.Id);
+        if (!retried)
+        {
+            errorMessage = "Retry failed. Please upload again.";
+            return;
+        }
+
+        phase = Phase.Processing;
+        StopPolling();
+        StartPolling();
     }
 
     private void GoBack() => NavigationManager.NavigateTo("/");

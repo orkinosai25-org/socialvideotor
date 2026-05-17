@@ -1,0 +1,9 @@
+namespace SocialVideotor.Services;
+
+public interface IClipStorage
+{
+    Task SaveAsync(Stream content, string blobPath, CancellationToken cancellationToken = default);
+    string GetAbsolutePath(string blobPath);
+    string GetPublicPath(string blobPath);
+    Task DeletePrefixAsync(string prefix, CancellationToken cancellationToken = default);
+}
