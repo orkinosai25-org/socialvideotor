@@ -51,7 +51,7 @@
         <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px; flex-wrap: wrap; margin-top: 4px;">
             @if (!string.IsNullOrWhiteSpace(Clip.HookText))
             {
-                <FluentBadge>Hook: @(Clip.HookText.Length > 20 ? Clip.HookText[..20] + "..." : Clip.HookText)</FluentBadge>
+                <FluentBadge>Hook: @TruncateBadgeText(Clip.HookText)</FluentBadge>
             }
             @if (Clip.AutoCaptionsEnabled)
             {
@@ -59,7 +59,7 @@
             }
             @foreach (var tile in Clip.TextTiles)
             {
-                <FluentBadge>@tile.Position: @(tile.Text.Length > 20 ? tile.Text[..20] + "..." : tile.Text)</FluentBadge>
+                <FluentBadge>@tile.Position: @TruncateBadgeText(tile.Text)</FluentBadge>
             }
         </FluentStack>
     </div>
@@ -69,6 +69,7 @@
     [Parameter] public VideoClip? Clip { get; set; }
     private const int CaptionBottomOffsetPx = 12;
     private const int HookBottomOffsetPx = 38;
+    private const int MaxBadgeTextLength = 20;
 
     private string GetTilePosition(TextTile tile) => tile.Position switch
     {
@@ -115,4 +116,7 @@
         var ts = TimeSpan.FromSeconds(seconds);
         return ts.ToString(@"m\:ss");
     }
+
+    private static string TruncateBadgeText(string text) =>
+        text.Length > MaxBadgeTextLength ? text[..MaxBadgeTextLength] + "..." : text;
 }
