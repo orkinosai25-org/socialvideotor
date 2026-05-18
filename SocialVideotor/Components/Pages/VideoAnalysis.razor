@@ -89,18 +89,29 @@ else
                 }
                 else
                 {
+                    <span style="font-size: 0.85rem; color: var(--neutral-foreground-hint);">
+                        Advisory guidance highlights stronger clips, but you can always ignore it.
+                    </span>
                     <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;">
                         @foreach (var clip in project.Clips)
                         {
+                            var advisory = GetAdvisory(clip);
+
                             <div style="border: 2px solid @(clip.IsSelected ? "var(--accent-fill-rest)" : "var(--neutral-stroke-rest)"); border-radius: 8px; padding: 16px; cursor: pointer; transition: all 0.2s;"
                                  @onclick="@(() => ToggleClipSelection(clip))">
                                 <FluentStack Orientation="Orientation.Vertical" Style="gap: 8px;">
                                     <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="justify-content: space-between;">
                                         <span style="font-weight: 600;">@clip.Title</span>
-                                        @if (clip.IsSelected)
-                                        {
-                                            <FluentBadge Appearance="Appearance.Accent">✓ Selected</FluentBadge>
-                                        }
+                                        <FluentStack Orientation="Orientation.Horizontal" Style="gap: 6px;">
+                                            @if (advisory.IsRecommended)
+                                            {
+                                                <FluentBadge Appearance="Appearance.Accent">Recommended</FluentBadge>
+                                            }
+                                            @if (clip.IsSelected)
+                                            {
+                                                <FluentBadge Appearance="Appearance.Accent">✓ Selected</FluentBadge>
+                                            }
+                                        </FluentStack>
                                     </FluentStack>
                                     <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px;">
                                         <span style="font-size: 0.85rem; color: var(--neutral-foreground-hint);">
@@ -114,6 +125,15 @@ else
                                     {
                                         <p style="margin: 0; font-size: 0.85rem; color: var(--neutral-foreground-hint);">@clip.Description</p>
                                     }
+                                    <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px; flex-wrap: wrap;">
+                                        @foreach (var reason in advisory.Reasons)
+                                        {
+                                            <FluentBadge>@reason</FluentBadge>
+                                        }
+                                        <FluentBadge Appearance="Appearance.Neutral">
+                                            Confidence: @advisory.Confidence
+                                        </FluentBadge>
+                                    </FluentStack>
                                     <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px;">
                                         <FluentBadge>@clip.TextTiles.Count tile(s)</FluentBadge>
                                     </FluentStack>
@@ -182,5 +202,50 @@ else
     {
         var ts = TimeSpan.FromSeconds(seconds);
         return ts.ToString(@"m\:ss");
+    }
+
+    private static (bool IsRecommended, string Confidence, List<string> Reasons) GetAdvisory(VideoClip clip)
+    {
+        var reasons = new List<string>();
+        var score = 0;
+
+        if (HasGoodHookSignal(clip))
+        {
+            reasons.Add("Good hook");
+            score += 2;
+        }
+
+        if (HasStrongMessageSignal(clip))
+        {
+            reasons.Add("Strong message");
+            score += 2;
+        }
+
+        if (clip.Duration is >= 10 and <= 60)
+        {
+            score += 1;
+        }
+
+        var confidence = score >= 4 ? "High" : score >= 2 ? "Medium" : "Low";
+        var isRecommended = score >= 3;
+
+        return (isRecommended, confidence, reasons);
+    }
+
+    private static bool HasGoodHookSignal(VideoClip clip)
+    {
+        if (!string.IsNullOrWhiteSpace(clip.HookText))
+        {
+            return true;
+        }
+
+        var source = $"{clip.Title} {clip.Description}".ToLowerInvariant();
+        return source.Contains("hook") || source.Contains("opening") || source.Contains("attention");
+    }
+
+    private static bool HasStrongMessageSignal(VideoClip clip)
+    {
+        var source = $"{clip.Title} {clip.Description}".ToLowerInvariant();
+        return source.Contains("key") || source.Contains("core") || source.Contains("message") || source.Contains("takeaway");
     }
 }
