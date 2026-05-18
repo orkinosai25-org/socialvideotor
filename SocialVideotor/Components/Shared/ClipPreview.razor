@@ -21,7 +21,7 @@
 
         @if (Clip.TextEnabled && Clip.AutoCaptionsEnabled && !string.IsNullOrWhiteSpace(GetCaptionText(Clip)))
         {
-            <div style="position: absolute; bottom: 12px; left: 0; right: 0; text-align: center; padding: 8px;">
+            <div style="position: absolute; bottom: @(CaptionBottomOffsetPx)px; left: 0; right: 0; text-align: center; padding: 8px;">
                 <span style="color: #fff; background: rgba(0,0,0,0.7); font-size: 12px; padding: 2px 8px; border-radius: 4px;">
                     @GetCaptionText(Clip)
                 </span>
@@ -65,7 +65,9 @@
 
 @code {
     [Parameter] public VideoClip? Clip { get; set; }
-    private const int HookBottomOffsetPx = 38;
+    private const int CaptionBottomOffsetPx = 12;
+    private const int HookCaptionSpacingPx = 26;
+    private const int HookBottomOffsetPx = CaptionBottomOffsetPx + HookCaptionSpacingPx;
 
     private string GetTilePosition(TextTile tile) => tile.Position switch
     {
@@ -102,7 +104,7 @@
 
         var suggestedCaption = clip.Suggestions.FirstOrDefault(s => !string.IsNullOrWhiteSpace(s.SuggestedCaption))?.SuggestedCaption;
         if (!string.IsNullOrWhiteSpace(suggestedCaption))
-            return suggestedCaption!;
+            return suggestedCaption;
 
         return !string.IsNullOrWhiteSpace(clip.Description) ? clip.Description : clip.Title;
     }

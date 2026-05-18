@@ -101,17 +101,17 @@ else
                                                     <div style="flex: 1;">
                                                         <FluentLabel>Preset Position</FluentLabel>
                                                         <FluentSelect TOption="string" @bind-Value="selectedClip.TextPosition" Style="width: 100%;">
-                                                            <FluentOption Value="top">Top</FluentOption>
-                                                            <FluentOption Value="center">Center</FluentOption>
-                                                            <FluentOption Value="bottom">Bottom</FluentOption>
+                                                            <FluentOption Value="@TextPositionTop">Top</FluentOption>
+                                                            <FluentOption Value="@TextPositionCenter">Center</FluentOption>
+                                                            <FluentOption Value="@TextPositionBottom">Bottom</FluentOption>
                                                         </FluentSelect>
                                                     </div>
                                                     <div style="flex: 1;">
                                                         <FluentLabel>Font Style</FluentLabel>
                                                         <FluentSelect TOption="string" @bind-Value="selectedClip.FontStyle" Style="width: 100%;">
-                                                            <FluentOption Value="regular">Regular</FluentOption>
-                                                            <FluentOption Value="bold">Bold</FluentOption>
-                                                            <FluentOption Value="italic">Italic</FluentOption>
+                                                            <FluentOption Value="@FontStyleRegular">Regular</FluentOption>
+                                                            <FluentOption Value="@FontStyleBold">Bold</FluentOption>
+                                                            <FluentOption Value="@FontStyleItalic">Italic</FluentOption>
                                                         </FluentSelect>
                                                     </div>
                                                 </FluentStack>
@@ -183,6 +183,12 @@ else
     private readonly Dictionary<string, (double StartTime, double EndTime)> originalTrimBounds = new();
     private const double TrimStepSeconds = 0.5;
     private const double MinimumTrimDurationSeconds = 0.1;
+    private const string TextPositionTop = "top";
+    private const string TextPositionCenter = "center";
+    private const string TextPositionBottom = "bottom";
+    private const string FontStyleRegular = "regular";
+    private const string FontStyleBold = "bold";
+    private const string FontStyleItalic = "italic";
 
     protected override void OnInitialized() => LoadProject();
 
@@ -303,11 +309,19 @@ else
     {
         if (selectedClip == null) return;
 
-        if (selectedClip.TextPosition is not ("top" or "center" or "bottom"))
-            selectedClip.TextPosition = "bottom";
+        if (selectedClip.TextPosition != TextPositionTop &&
+            selectedClip.TextPosition != TextPositionCenter &&
+            selectedClip.TextPosition != TextPositionBottom)
+        {
+            selectedClip.TextPosition = TextPositionBottom;
+        }
 
-        if (selectedClip.FontStyle is not ("regular" or "bold" or "italic"))
-            selectedClip.FontStyle = "regular";
+        if (selectedClip.FontStyle != FontStyleRegular &&
+            selectedClip.FontStyle != FontStyleBold &&
+            selectedClip.FontStyle != FontStyleItalic)
+        {
+            selectedClip.FontStyle = FontStyleRegular;
+        }
     }
 
     private void RefreshClipSelection(string? preferredClipId = null)
