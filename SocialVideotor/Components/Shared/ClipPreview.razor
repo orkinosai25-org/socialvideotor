@@ -28,13 +28,16 @@
             </div>
         }
 
-        @foreach (var tile in Clip.TextEnabled ? Clip.TextTiles : Enumerable.Empty<TextTile>())
+        @if (Clip.TextEnabled)
         {
-            <div style="position: absolute; @GetTilePosition(tile); left: 0; right: 0; text-align: center; padding: 8px;">
-                <span style="color: @tile.Color; background: @tile.BackgroundColor; font-size: @(tile.FontSize * 0.5)px; padding: 2px 8px; border-radius: 4px;">
-                    @tile.Text
-                </span>
-            </div>
+            @foreach (var tile in Clip.TextTiles)
+            {
+                <div style="position: absolute; @GetTilePosition(tile); left: 0; right: 0; text-align: center; padding: 8px;">
+                    <span style="color: @tile.Color; background: @tile.BackgroundColor; font-size: @(tile.FontSize * 0.5)px; padding: 2px 8px; border-radius: 4px;">
+                        @tile.Text
+                    </span>
+                </div>
+            }
         }
     }
 </div>
@@ -62,6 +65,7 @@
 
 @code {
     [Parameter] public VideoClip? Clip { get; set; }
+    private const int HookBottomOffsetPx = 38;
 
     private string GetTilePosition(TextTile tile) => tile.Position switch
     {
@@ -75,8 +79,8 @@
     {
         "top" => "top: 10px;",
         "center" => "top: 50%; transform: translateY(-50%);",
-        "bottom" => "bottom: 38px;",
-        _ => "bottom: 38px;"
+        "bottom" => $"bottom: {HookBottomOffsetPx}px;",
+        _ => $"bottom: {HookBottomOffsetPx}px;"
     };
 
     private string GetPresetTextStyle(string? fontStyle)

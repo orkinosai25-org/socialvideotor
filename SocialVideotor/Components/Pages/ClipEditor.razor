@@ -308,13 +308,6 @@ else
 
         if (selectedClip.FontStyle is not ("regular" or "bold" or "italic"))
             selectedClip.FontStyle = "regular";
-
-        if (!selectedClip.TextEnabled)
-        {
-            selectedClip.AutoCaptionsEnabled = false;
-            selectedClip.CaptionText = string.Empty;
-            selectedClip.HookText = string.Empty;
-        }
     }
 
     private void RefreshClipSelection(string? preferredClipId = null)
