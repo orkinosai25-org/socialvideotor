@@ -79,6 +79,45 @@ else
                                         <FluentLabel>Description</FluentLabel>
                                         <FluentTextArea @bind-Value="selectedClip.Description" Style="width: 100%;" Rows="3" />
                                     </div>
+                                    <FluentCard Style="padding: 12px;">
+                                        <FluentStack Orientation="Orientation.Vertical" Style="gap: 12px;">
+                                            <FluentLabel Style="font-weight: 600;">Text & Captions</FluentLabel>
+                                            <FluentCheckbox @bind-Value="selectedClip.TextEnabled" Label="Enable text for this clip" />
+                                            @if (selectedClip.TextEnabled)
+                                            {
+                                                <div>
+                                                    <FluentLabel>Hook / Title Text</FluentLabel>
+                                                    <FluentTextField @bind-Value="selectedClip.HookText" Placeholder="Add a short hook" Style="width: 100%;" />
+                                                </div>
+                                                <FluentCheckbox @bind-Value="selectedClip.AutoCaptionsEnabled" Label="Auto captions" />
+                                                @if (selectedClip.AutoCaptionsEnabled)
+                                                {
+                                                    <div>
+                                                        <FluentLabel>Caption Text (optional override)</FluentLabel>
+                                                        <FluentTextArea @bind-Value="selectedClip.CaptionText" Rows="2" Style="width: 100%;" />
+                                                    </div>
+                                                }
+                                                <FluentStack Orientation="Orientation.Horizontal" Style="gap: 12px;">
+                                                    <div style="flex: 1;">
+                                                        <FluentLabel>Preset Position</FluentLabel>
+                                                        <FluentSelect TOption="string" @bind-Value="selectedClip.TextPosition" Style="width: 100%;">
+                                                            <FluentOption Value="top">Top</FluentOption>
+                                                            <FluentOption Value="center">Center</FluentOption>
+                                                            <FluentOption Value="bottom">Bottom</FluentOption>
+                                                        </FluentSelect>
+                                                    </div>
+                                                    <div style="flex: 1;">
+                                                        <FluentLabel>Font Style</FluentLabel>
+                                                        <FluentSelect TOption="string" @bind-Value="selectedClip.FontStyle" Style="width: 100%;">
+                                                            <FluentOption Value="regular">Regular</FluentOption>
+                                                            <FluentOption Value="bold">Bold</FluentOption>
+                                                            <FluentOption Value="italic">Italic</FluentOption>
+                                                        </FluentSelect>
+                                                    </div>
+                                                </FluentStack>
+                                            }
+                                        </FluentStack>
+                                    </FluentCard>
                                     <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px;">
                                         <FluentButton Appearance="Appearance.Accent" OnClick="@SaveClip">Save Changes</FluentButton>
                                         <FluentButton Appearance="Appearance.Outline" OnClick="@ResetTrimToOriginal">Reset to Original</FluentButton>
@@ -89,11 +128,18 @@ else
                                 <FluentStack Orientation="Orientation.Vertical" Style="gap: 16px; padding-top: 16px;">
                                     <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="justify-content: space-between;">
                                         <h4 style="margin: 0;">Text Overlays (@selectedClip.TextTiles.Count)</h4>
-                                        <FluentButton Appearance="Appearance.Accent" OnClick="@AddTextTile">
+                                        <FluentButton Appearance="Appearance.Accent" OnClick="@AddTextTile" Disabled="@(!selectedClip.TextEnabled)">
                                             <FluentIcon Value="@(new Icons.Regular.Size20.Add())" Slot="start" />
                                             Add Tile
                                         </FluentButton>
                                     </FluentStack>
+
+                                    @if (!selectedClip.TextEnabled)
+                                    {
+                                        <FluentLabel Style="font-size: 0.85rem; color: var(--neutral-foreground-hint);">
+                                            Turn on text in Clip Settings to add overlays or captions.
+                                        </FluentLabel>
+                                    }
 
                                     @foreach (var tile in selectedClip.TextTiles)
                                     {
@@ -169,6 +215,7 @@ else
     private void AddTextTile()
     {
         if (selectedClip == null) return;
+        selectedClip.TextEnabled = true;
         selectedClip.TextTiles.Add(new TextTile
         {
             Text = "Your message here",
@@ -197,6 +244,7 @@ else
     {
         if (project == null || selectedClip == null) return;
         NormalizeTrimBounds();
+        NormalizeTextSettings();
         ProjectService.UpdateClip(project.Id, selectedClip);
 
         project = ProjectService.GetProject(ProjectId);
@@ -252,6 +300,24 @@ else
         selectedClip.EndTime = clampedEnd;
     }
 
+    private void NormalizeTextSettings()
+    {
+        if (selectedClip == null) return;
+
+        if (selectedClip.TextPosition is not ("top" or "center" or "bottom"))
+            selectedClip.TextPosition = "bottom";
+
+        if (selectedClip.FontStyle is not ("regular" or "bold" or "italic"))
+            selectedClip.FontStyle = "regular";
+
+        if (!selectedClip.TextEnabled)
+        {
+            selectedClip.AutoCaptionsEnabled = false;
+            selectedClip.CaptionText = string.Empty;
+            selectedClip.HookText = string.Empty;
+        }
+    }
+
     private void RefreshClipSelection(string? preferredClipId = null)
     {
         if (project == null)
@@ -287,6 +353,12 @@ else
             StartTime = clip.StartTime,
             EndTime = clip.EndTime,
             ThumbnailUrl = clip.ThumbnailUrl,
+            TextEnabled = clip.TextEnabled,
+            HookText = clip.HookText,
+            AutoCaptionsEnabled = clip.AutoCaptionsEnabled,
+            CaptionText = clip.CaptionText,
+            TextPosition = clip.TextPosition,
+            FontStyle = clip.FontStyle,
             Suggestions = clip.Suggestions.Select(s => new GenerationSuggestion
             {
                 Id = s.Id,

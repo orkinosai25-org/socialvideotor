@@ -10,7 +10,25 @@
             </p>
         </div>
 
-        @foreach (var tile in Clip.TextTiles)
+        @if (Clip.TextEnabled && !string.IsNullOrWhiteSpace(Clip.HookText))
+        {
+            <div style="position: absolute; @GetPresetPosition(Clip.TextPosition); left: 0; right: 0; text-align: center; padding: 8px;">
+                <span style="@GetPresetTextStyle(Clip.FontStyle)">
+                    @Clip.HookText
+                </span>
+            </div>
+        }
+
+        @if (Clip.TextEnabled && Clip.AutoCaptionsEnabled && !string.IsNullOrWhiteSpace(GetCaptionText(Clip)))
+        {
+            <div style="position: absolute; bottom: 12px; left: 0; right: 0; text-align: center; padding: 8px;">
+                <span style="color: #fff; background: rgba(0,0,0,0.7); font-size: 12px; padding: 2px 8px; border-radius: 4px;">
+                    @GetCaptionText(Clip)
+                </span>
+            </div>
+        }
+
+        @foreach (var tile in Clip.TextEnabled ? Clip.TextTiles : Enumerable.Empty<TextTile>())
         {
             <div style="position: absolute; @GetTilePosition(tile); left: 0; right: 0; text-align: center; padding: 8px;">
                 <span style="color: @tile.Color; background: @tile.BackgroundColor; font-size: @(tile.FontSize * 0.5)px; padding: 2px 8px; border-radius: 4px;">
@@ -21,11 +39,19 @@
     }
 </div>
 
-@if (Clip != null && Clip.TextTiles.Any())
+@if (Clip != null && Clip.TextEnabled && (Clip.TextTiles.Any() || !string.IsNullOrWhiteSpace(Clip.HookText) || Clip.AutoCaptionsEnabled))
 {
     <div style="margin-top: 8px;">
         <FluentLabel>Text Overlays: @Clip.TextTiles.Count</FluentLabel>
         <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px; flex-wrap: wrap; margin-top: 4px;">
+            @if (!string.IsNullOrWhiteSpace(Clip.HookText))
+            {
+                <FluentBadge>Hook: @(Clip.HookText.Length > 20 ? Clip.HookText[..20] + "..." : Clip.HookText)</FluentBadge>
+            }
+            @if (Clip.AutoCaptionsEnabled)
+            {
+                <FluentBadge>Captions: Auto</FluentBadge>
+            }
             @foreach (var tile in Clip.TextTiles)
             {
                 <FluentBadge>@tile.Position: @(tile.Text.Length > 20 ? tile.Text[..20] + "..." : tile.Text)</FluentBadge>
@@ -44,6 +70,38 @@
         "bottom" => "bottom: 8px;",
         _ => "bottom: 8px;"
     };
+
+    private string GetPresetPosition(string? position) => position switch
+    {
+        "top" => "top: 10px;",
+        "center" => "top: 50%; transform: translateY(-50%);",
+        "bottom" => "bottom: 38px;",
+        _ => "bottom: 38px;"
+    };
+
+    private string GetPresetTextStyle(string? fontStyle)
+    {
+        var style = fontStyle switch
+        {
+            "bold" => "font-weight: 700;",
+            "italic" => "font-style: italic; font-weight: 600;",
+            _ => "font-weight: 600;"
+        };
+
+        return $"color: #fff; background: rgba(0,0,0,0.7); font-size: 18px; padding: 4px 8px; border-radius: 4px; {style}";
+    }
+
+    private static string GetCaptionText(VideoClip clip)
+    {
+        if (!string.IsNullOrWhiteSpace(clip.CaptionText))
+            return clip.CaptionText;
+
+        var suggestedCaption = clip.Suggestions.FirstOrDefault(s => !string.IsNullOrWhiteSpace(s.SuggestedCaption))?.SuggestedCaption;
+        if (!string.IsNullOrWhiteSpace(suggestedCaption))
+            return suggestedCaption!;
+
+        return !string.IsNullOrWhiteSpace(clip.Description) ? clip.Description : clip.Title;
+    }
 
     private string FormatTime(double seconds)
     {
