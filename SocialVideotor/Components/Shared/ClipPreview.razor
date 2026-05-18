@@ -3,6 +3,8 @@
 <div style="background: #000; border-radius: 8px; aspect-ratio: 16/9; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center;">
     @if (Clip != null)
     {
+        var captionText = GetCaptionText(Clip);
+
         <div style="color: #fff; text-align: center;">
             <FluentIcon Value="@(new Icons.Regular.Size48.Play())" Style="color: white; opacity: 0.7;" />
             <p style="margin: 8px 0 0 0; font-size: 0.85rem; opacity: 0.8;">
@@ -19,11 +21,11 @@
             </div>
         }
 
-        @if (Clip.TextEnabled && Clip.AutoCaptionsEnabled && !string.IsNullOrWhiteSpace(GetCaptionText(Clip)))
+        @if (Clip.TextEnabled && Clip.AutoCaptionsEnabled && !string.IsNullOrWhiteSpace(captionText))
         {
             <div style="position: absolute; bottom: @(CaptionBottomOffsetPx)px; left: 0; right: 0; text-align: center; padding: 8px;">
                 <span style="color: #fff; background: rgba(0,0,0,0.7); font-size: 12px; padding: 2px 8px; border-radius: 4px;">
-                    @GetCaptionText(Clip)
+                    @captionText
                 </span>
             </div>
         }
@@ -66,8 +68,7 @@
 @code {
     [Parameter] public VideoClip? Clip { get; set; }
     private const int CaptionBottomOffsetPx = 12;
-    private const int HookCaptionSpacingPx = 26;
-    private const int HookBottomOffsetPx = CaptionBottomOffsetPx + HookCaptionSpacingPx;
+    private const int HookBottomOffsetPx = 38;
 
     private string GetTilePosition(TextTile tile) => tile.Position switch
     {
