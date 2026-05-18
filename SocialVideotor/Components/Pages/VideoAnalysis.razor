@@ -128,11 +128,14 @@ else
                                     <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px; flex-wrap: wrap;">
                                         @foreach (var reason in advisory.Reasons)
                                         {
-                                            <FluentBadge>@reason</FluentBadge>
+                                            <FluentBadge aria-label="@($"Advisory reason: {reason}")">@reason</FluentBadge>
                                         }
-                                        <FluentBadge Appearance="Appearance.Neutral">
-                                            Confidence: @advisory.Confidence
-                                        </FluentBadge>
+                                        @if (advisory.Reasons.Count > 0)
+                                        {
+                                            <FluentBadge Appearance="Appearance.Neutral" aria-label="@($"Recommendation confidence level: {advisory.Confidence}")">
+                                                Confidence: @advisory.Confidence
+                                            </FluentBadge>
+                                        }
                                     </FluentStack>
                                     <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px;">
                                         <FluentBadge>@clip.TextTiles.Count tile(s)</FluentBadge>
@@ -149,6 +152,7 @@ else
 
 @code {
     [Parameter] public string ProjectId { get; set; } = string.Empty;
+    private static readonly char[] WordSeparators = [' ', '\t', '\r', '\n', '.', ',', ':', ';', '!', '?', '-', '_', '/', '\\', '(', ')', '[', ']', '{', '}', '"', '\''];
 
     private VideoProject? project;
 
@@ -206,46 +210,67 @@ else
 
     private static (bool IsRecommended, string Confidence, List<string> Reasons) GetAdvisory(VideoClip clip)
     {
+        const int HookSignalWeight = 2;
+        const int MessageSignalWeight = 2;
+        const int MediumConfidenceThreshold = 2;
+        const int HighConfidenceThreshold = 4;
+        const int RecommendationThreshold = 2;
+
         var reasons = new List<string>();
         var score = 0;
+        var searchableText = $"{clip.Title ?? string.Empty} {clip.Description ?? string.Empty}";
+        var searchableWords = GetWordSet(searchableText);
 
-        if (HasGoodHookSignal(clip))
+        if (HasGoodHookSignal(clip, searchableWords))
         {
             reasons.Add("Good hook");
-            score += 2;
+            score += HookSignalWeight;
         }
 
-        if (HasStrongMessageSignal(clip))
+        if (HasStrongMessageSignal(searchableWords))
         {
             reasons.Add("Strong message");
-            score += 2;
+            score += MessageSignalWeight;
         }
 
-        if (clip.Duration is >= 10 and <= 60)
-        {
-            score += 1;
-        }
-
-        var confidence = score >= 4 ? "High" : score >= 2 ? "Medium" : "Low";
-        var isRecommended = score >= 3;
+        var confidence = DetermineConfidenceLevel(score, MediumConfidenceThreshold, HighConfidenceThreshold);
+        var isRecommended = score >= RecommendationThreshold;
 
         return (isRecommended, confidence, reasons);
     }
 
-    private static bool HasGoodHookSignal(VideoClip clip)
+    private static bool HasGoodHookSignal(VideoClip clip, HashSet<string> searchableWords)
     {
         if (!string.IsNullOrWhiteSpace(clip.HookText))
         {
             return true;
         }
 
-        var source = $"{clip.Title} {clip.Description}".ToLowerInvariant();
-        return source.Contains("hook") || source.Contains("opening") || source.Contains("attention");
+        return ContainsKeyword(searchableWords, "hook", "opening", "attention");
     }
 
-    private static bool HasStrongMessageSignal(VideoClip clip)
+    private static bool HasStrongMessageSignal(HashSet<string> searchableWords)
     {
-        var source = $"{clip.Title} {clip.Description}".ToLowerInvariant();
-        return source.Contains("key") || source.Contains("core") || source.Contains("message") || source.Contains("takeaway");
+        return ContainsKeyword(searchableWords, "key", "core", "message", "takeaway");
+    }
+
+    private static string DetermineConfidenceLevel(int score, int mediumConfidenceThreshold, int highConfidenceThreshold)
+    {
+        if (score >= highConfidenceThreshold) return "High";
+        if (score >= mediumConfidenceThreshold) return "Medium";
+        return "Low";
+    }
+
+    private static HashSet<string> GetWordSet(string searchableText)
+    {
+        return searchableText
+            .Split(WordSeparators,
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static bool ContainsKeyword(HashSet<string> searchableWords, params string[] keywords)
+    {
+        return keywords.Any(searchableWords.Contains);
     }
 }
