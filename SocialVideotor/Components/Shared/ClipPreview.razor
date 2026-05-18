@@ -3,6 +3,8 @@
 <div style="background: #000; border-radius: 8px; aspect-ratio: 16/9; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center;">
     @if (Clip != null)
     {
+        var captionText = GetCaptionText(Clip);
+
         <div style="color: #fff; text-align: center;">
             <FluentIcon Value="@(new Icons.Regular.Size48.Play())" Style="color: white; opacity: 0.7;" />
             <p style="margin: 8px 0 0 0; font-size: 0.85rem; opacity: 0.8;">
@@ -10,25 +12,54 @@
             </p>
         </div>
 
-        @foreach (var tile in Clip.TextTiles)
+        @if (Clip.TextEnabled && !string.IsNullOrWhiteSpace(Clip.HookText))
         {
-            <div style="position: absolute; @GetTilePosition(tile); left: 0; right: 0; text-align: center; padding: 8px;">
-                <span style="color: @tile.Color; background: @tile.BackgroundColor; font-size: @(tile.FontSize * 0.5)px; padding: 2px 8px; border-radius: 4px;">
-                    @tile.Text
+            <div style="position: absolute; @GetPresetPosition(Clip.TextPosition); left: 0; right: 0; text-align: center; padding: 8px;">
+                <span style="@GetPresetTextStyle(Clip.FontStyle)">
+                    @Clip.HookText
                 </span>
             </div>
+        }
+
+        @if (Clip.TextEnabled && Clip.AutoCaptionsEnabled && !string.IsNullOrWhiteSpace(captionText))
+        {
+            <div style="position: absolute; bottom: @(CaptionBottomOffsetPx)px; left: 0; right: 0; text-align: center; padding: 8px;">
+                <span style="color: #fff; background: rgba(0,0,0,0.7); font-size: 12px; padding: 2px 8px; border-radius: 4px;">
+                    @captionText
+                </span>
+            </div>
+        }
+
+        @if (Clip.TextEnabled)
+        {
+            @foreach (var tile in Clip.TextTiles)
+            {
+                <div style="position: absolute; @GetTilePosition(tile); left: 0; right: 0; text-align: center; padding: 8px;">
+                    <span style="color: @tile.Color; background: @tile.BackgroundColor; font-size: @(tile.FontSize * 0.5)px; padding: 2px 8px; border-radius: 4px;">
+                        @tile.Text
+                    </span>
+                </div>
+            }
         }
     }
 </div>
 
-@if (Clip != null && Clip.TextTiles.Any())
+@if (Clip != null && Clip.TextEnabled && (Clip.TextTiles.Any() || !string.IsNullOrWhiteSpace(Clip.HookText) || Clip.AutoCaptionsEnabled))
 {
     <div style="margin-top: 8px;">
         <FluentLabel>Text Overlays: @Clip.TextTiles.Count</FluentLabel>
         <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px; flex-wrap: wrap; margin-top: 4px;">
+            @if (!string.IsNullOrWhiteSpace(Clip.HookText))
+            {
+                <FluentBadge>Hook: @TruncateBadgeText(Clip.HookText)</FluentBadge>
+            }
+            @if (Clip.AutoCaptionsEnabled)
+            {
+                <FluentBadge>Captions: Auto</FluentBadge>
+            }
             @foreach (var tile in Clip.TextTiles)
             {
-                <FluentBadge>@tile.Position: @(tile.Text.Length > 20 ? tile.Text[..20] + "..." : tile.Text)</FluentBadge>
+                <FluentBadge>@tile.Position: @TruncateBadgeText(tile.Text)</FluentBadge>
             }
         </FluentStack>
     </div>
@@ -36,6 +67,9 @@
 
 @code {
     [Parameter] public VideoClip? Clip { get; set; }
+    private const int CaptionBottomOffsetPx = 12;
+    private const int HookBottomOffsetPx = 38;
+    private const int MaxBadgeTextLength = 20;
 
     private string GetTilePosition(TextTile tile) => tile.Position switch
     {
@@ -45,9 +79,44 @@
         _ => "bottom: 8px;"
     };
 
+    private string GetPresetPosition(string? position) => position switch
+    {
+        "top" => "top: 10px;",
+        "center" => "top: 50%; transform: translateY(-50%);",
+        "bottom" => $"bottom: {HookBottomOffsetPx}px;",
+        _ => $"bottom: {HookBottomOffsetPx}px;"
+    };
+
+    private string GetPresetTextStyle(string? fontStyle)
+    {
+        var style = fontStyle switch
+        {
+            "bold" => "font-weight: 700;",
+            "italic" => "font-style: italic; font-weight: 600;",
+            _ => "font-weight: 600;"
+        };
+
+        return $"color: #fff; background: rgba(0,0,0,0.7); font-size: 18px; padding: 4px 8px; border-radius: 4px; {style}";
+    }
+
+    private static string GetCaptionText(VideoClip clip)
+    {
+        if (!string.IsNullOrWhiteSpace(clip.CaptionText))
+            return clip.CaptionText;
+
+        var suggestedCaption = clip.Suggestions.FirstOrDefault(s => !string.IsNullOrWhiteSpace(s.SuggestedCaption))?.SuggestedCaption;
+        if (!string.IsNullOrWhiteSpace(suggestedCaption))
+            return suggestedCaption;
+
+        return !string.IsNullOrWhiteSpace(clip.Description) ? clip.Description : clip.Title;
+    }
+
     private string FormatTime(double seconds)
     {
         var ts = TimeSpan.FromSeconds(seconds);
         return ts.ToString(@"m\:ss");
     }
+
+    private static string TruncateBadgeText(string text) =>
+        text.Length > MaxBadgeTextLength ? text[..MaxBadgeTextLength] + "..." : text;
 }

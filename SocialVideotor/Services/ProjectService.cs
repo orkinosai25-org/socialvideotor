@@ -27,6 +27,9 @@ public class ProjectService : IProjectService
                     EndTime = 15,
                     IsSelected = true,
                     Description = "Great opening hook for social media",
+                    TextEnabled = true,
+                    HookText = "Stop scrolling 👀",
+                    AutoCaptionsEnabled = true,
                     TextTiles = new List<TextTile>
                     {
                         new TextTile { Text = "Check this out!", Position = "top", FontSize = 28, Color = "#FFFFFF" }
