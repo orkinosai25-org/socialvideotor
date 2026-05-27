@@ -89,18 +89,29 @@ else
                 }
                 else
                 {
+                    <span style="font-size: 0.85rem; color: var(--neutral-foreground-hint);">
+                        Advisory guidance highlights stronger clips, but you can always ignore it.
+                    </span>
                     <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;">
                         @foreach (var clip in project.Clips)
                         {
+                            var advisory = GetAdvisory(clip);
+
                             <div style="border: 2px solid @(clip.IsSelected ? "var(--accent-fill-rest)" : "var(--neutral-stroke-rest)"); border-radius: 8px; padding: 16px; cursor: pointer; transition: all 0.2s;"
                                  @onclick="@(() => ToggleClipSelection(clip))">
                                 <FluentStack Orientation="Orientation.Vertical" Style="gap: 8px;">
                                     <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center" Style="justify-content: space-between;">
                                         <span style="font-weight: 600;">@clip.Title</span>
-                                        @if (clip.IsSelected)
-                                        {
-                                            <FluentBadge Appearance="Appearance.Accent">✓ Selected</FluentBadge>
-                                        }
+                                        <FluentStack Orientation="Orientation.Horizontal" Style="gap: 6px;">
+                                            @if (advisory.IsRecommended)
+                                            {
+                                                <FluentBadge Appearance="Appearance.Accent">Recommended</FluentBadge>
+                                            }
+                                            @if (clip.IsSelected)
+                                            {
+                                                <FluentBadge Appearance="Appearance.Accent">✓ Selected</FluentBadge>
+                                            }
+                                        </FluentStack>
                                     </FluentStack>
                                     <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px;">
                                         <span style="font-size: 0.85rem; color: var(--neutral-foreground-hint);">
@@ -114,6 +125,18 @@ else
                                     {
                                         <p style="margin: 0; font-size: 0.85rem; color: var(--neutral-foreground-hint);">@clip.Description</p>
                                     }
+                                    <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px; flex-wrap: wrap;">
+                                        @foreach (var reason in advisory.Reasons)
+                                        {
+                                            <FluentBadge aria-label="@($"Advisory reason: {reason}")">@reason</FluentBadge>
+                                        }
+                                        @if (advisory.Reasons.Count > 0)
+                                        {
+                                            <FluentBadge Appearance="Appearance.Neutral" aria-label="@($"Recommendation confidence level: {advisory.Confidence}")">
+                                                Confidence: @advisory.Confidence
+                                            </FluentBadge>
+                                        }
+                                    </FluentStack>
                                     <FluentStack Orientation="Orientation.Horizontal" Style="gap: 8px;">
                                         <FluentBadge>@clip.TextTiles.Count tile(s)</FluentBadge>
                                     </FluentStack>
@@ -129,6 +152,7 @@ else
 
 @code {
     [Parameter] public string ProjectId { get; set; } = string.Empty;
+    private static readonly char[] WordSeparators = [' ', '\t', '\r', '\n', '.', ',', ':', ';', '!', '?', '-', '_', '/', '\\', '(', ')', '[', ']', '{', '}', '"', '\''];
 
     private VideoProject? project;
 
@@ -182,5 +206,71 @@ else
     {
         var ts = TimeSpan.FromSeconds(seconds);
         return ts.ToString(@"m\:ss");
+    }
+
+    private static (bool IsRecommended, string Confidence, List<string> Reasons) GetAdvisory(VideoClip clip)
+    {
+        const int HookSignalWeight = 2;
+        const int MessageSignalWeight = 2;
+        const int MediumConfidenceThreshold = 2;
+        const int HighConfidenceThreshold = 4;
+        const int RecommendationThreshold = 2;
+
+        var reasons = new List<string>();
+        var score = 0;
+        var searchableText = $"{clip.Title ?? string.Empty} {clip.Description ?? string.Empty}";
+        var searchableWords = GetWordSet(searchableText);
+
+        if (HasGoodHookSignal(clip, searchableWords))
+        {
+            reasons.Add("Good hook");
+            score += HookSignalWeight;
+        }
+
+        if (HasStrongMessageSignal(searchableWords))
+        {
+            reasons.Add("Strong message");
+            score += MessageSignalWeight;
+        }
+
+        var confidence = DetermineConfidenceLevel(score, MediumConfidenceThreshold, HighConfidenceThreshold);
+        var isRecommended = score >= RecommendationThreshold;
+
+        return (isRecommended, confidence, reasons);
+    }
+
+    private static bool HasGoodHookSignal(VideoClip clip, HashSet<string> searchableWords)
+    {
+        if (!string.IsNullOrWhiteSpace(clip.HookText))
+        {
+            return true;
+        }
+
+        return ContainsKeyword(searchableWords, "hook", "opening", "attention");
+    }
+
+    private static bool HasStrongMessageSignal(HashSet<string> searchableWords)
+    {
+        return ContainsKeyword(searchableWords, "key", "core", "message", "takeaway");
+    }
+
+    private static string DetermineConfidenceLevel(int score, int mediumConfidenceThreshold, int highConfidenceThreshold)
+    {
+        if (score >= highConfidenceThreshold) return "High";
+        if (score >= mediumConfidenceThreshold) return "Medium";
+        return "Low";
+    }
+
+    private static HashSet<string> GetWordSet(string searchableText)
+    {
+        return searchableText
+            .Split(WordSeparators,
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static bool ContainsKeyword(HashSet<string> searchableWords, params string[] keywords)
+    {
+        return keywords.Any(searchableWords.Contains);
     }
 }
