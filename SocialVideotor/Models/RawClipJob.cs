@@ -6,6 +6,7 @@ public class RawClipJob
     public string UserId { get; set; } = "anonymous";
     public string SourceFileName { get; set; } = string.Empty;
     public string SourceBlobPath { get; set; } = string.Empty;
+    public string? SourceIngressBlobName { get; set; }
     public RawClipJobStatus Status { get; set; } = RawClipJobStatus.Queued;
     public string StatusMessage { get; set; } = "Queued";
     public int ProgressPercent { get; set; }
