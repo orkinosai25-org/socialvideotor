@@ -5,6 +5,8 @@ public class RawClipJob
     public string Id { get; set; } = Guid.NewGuid().ToString();
     public string UserId { get; set; } = "anonymous";
     public string SourceFileName { get; set; } = string.Empty;
+    public long SourceFileSizeBytes { get; set; }
+    public string? SourceContentType { get; set; }
     public string SourceBlobPath { get; set; } = string.Empty;
     public string? SourceIngressBlobName { get; set; }
     public RawClipJobStatus Status { get; set; } = RawClipJobStatus.Queued;

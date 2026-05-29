@@ -269,7 +269,17 @@
             });
 
             if (!initiateResponse.IsSuccessStatusCode)
-                throw new InvalidOperationException(await initiateResponse.Content.ReadAsStringAsync());
+            {
+                var initiateError = await initiateResponse.Content.ReadAsStringAsync();
+                if (initiateResponse.StatusCode == System.Net.HttpStatusCode.BadRequest &&
+                    initiateError.Contains("Direct upload is not configured.", StringComparison.OrdinalIgnoreCase))
+                {
+                    await UploadViaServerAsync(client);
+                    return;
+                }
+
+                throw new InvalidOperationException(initiateError);
+            }
 
             var initiatePayload = await initiateResponse.Content.ReadFromJsonAsync<UploadInitiateResponse>();
             if (initiatePayload == null)
@@ -300,6 +310,33 @@
             errorMessage = ex.Message;
             phase = Phase.Idle;
         }
+    }
+
+    private async Task UploadViaServerAsync(HttpClient client)
+    {
+        if (selectedFile == null)
+            throw new InvalidOperationException("No file selected.");
+
+        await using var stream = selectedFile.OpenReadStream(500L * 1024 * 1024);
+        using var fileContent = new StreamContent(stream);
+        fileContent.Headers.TryAddWithoutValidation(
+            "Content-Type",
+            string.IsNullOrWhiteSpace(selectedFile.ContentType) ? "video/mp4" : selectedFile.ContentType);
+
+        using var form = new MultipartFormDataContent
+        {
+            { fileContent, "file", selectedFile.Name }
+        };
+
+        var uploadResponse = await client.PostAsync("/api/jobs/upload", form);
+        if (!uploadResponse.IsSuccessStatusCode)
+            throw new InvalidOperationException(await uploadResponse.Content.ReadAsStringAsync());
+
+        currentJob = await uploadResponse.Content.ReadFromJsonAsync<RawClipJob>();
+        if (currentJob == null)
+            throw new InvalidOperationException("Upload completed but no job was returned.");
+
+        StartPolling();
     }
 
     private void StartPolling()

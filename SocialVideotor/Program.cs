@@ -158,9 +158,21 @@ app.MapPost("/api/uploads/complete", async (
     if (!string.Equals(job.SourceIngressBlobName, request.BlobName, StringComparison.Ordinal))
         return Results.BadRequest("Blob name does not match initiated upload.");
 
-    var blobExists = await directUploadService.BlobExistsAsync(request.BlobName, cancellationToken);
-    if (!blobExists)
+    var blobProperties = await directUploadService.GetBlobPropertiesAsync(request.BlobName, cancellationToken);
+    if (blobProperties == null)
         return Results.BadRequest("Uploaded blob was not found.");
+    if (blobProperties.ContentLength <= 0)
+        return Results.BadRequest("Uploaded blob is empty.");
+    if (job.SourceFileSizeBytes > 0 && blobProperties.ContentLength != job.SourceFileSizeBytes)
+        return Results.BadRequest("Uploaded blob size does not match the initiated upload.");
+    if (!string.IsNullOrWhiteSpace(job.SourceContentType))
+    {
+        static string NormalizeContentType(string contentType) => contentType.Split(';', 2)[0].Trim();
+        var expectedContentType = NormalizeContentType(job.SourceContentType);
+        var actualContentType = NormalizeContentType(blobProperties.ContentType);
+        if (string.IsNullOrWhiteSpace(actualContentType) || !string.Equals(actualContentType, expectedContentType, StringComparison.OrdinalIgnoreCase))
+            return Results.BadRequest("Uploaded blob content type does not match the initiated upload.");
+    }
 
     var completedJob = await rawClipService.CompleteDirectUploadAsync(request.JobId, userId, cancellationToken);
     if (completedJob == null)

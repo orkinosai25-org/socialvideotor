@@ -1,3 +1,4 @@
+using Azure;
 using Azure.Storage.Blobs;
 using Azure.Storage.Sas;
 using Microsoft.Extensions.Options;
@@ -57,11 +58,35 @@ public class AzureDirectUploadService : IDirectUploadService
         return exists.Value;
     }
 
+    public async Task<DirectUploadBlobProperties?> GetBlobPropertiesAsync(string blobName, CancellationToken cancellationToken = default)
+    {
+        var blobClient = GetRequiredContainerClient().GetBlobClient(blobName);
+        try
+        {
+            var response = await blobClient.GetPropertiesAsync(cancellationToken: cancellationToken);
+            return new DirectUploadBlobProperties
+            {
+                ContentLength = response.Value.ContentLength,
+                ContentType = response.Value.ContentType ?? string.Empty
+            };
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404)
+        {
+            return null;
+        }
+    }
+
     public async Task DownloadBlobAsync(string blobName, string destinationPath, CancellationToken cancellationToken = default)
     {
         var blobClient = GetRequiredContainerClient().GetBlobClient(blobName);
         Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
         await blobClient.DownloadToAsync(destinationPath, cancellationToken);
+    }
+
+    public async Task DeleteBlobIfExistsAsync(string blobName, CancellationToken cancellationToken = default)
+    {
+        var blobClient = GetRequiredContainerClient().GetBlobClient(blobName);
+        await blobClient.DeleteIfExistsAsync(cancellationToken: cancellationToken);
     }
 
     private BlobContainerClient GetRequiredContainerClient()
