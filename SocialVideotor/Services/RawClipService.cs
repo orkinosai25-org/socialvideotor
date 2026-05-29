@@ -18,8 +18,10 @@ public class RawClipService : IRawClipService, IDisposable
     };
     private const int MinProcessTimeoutSeconds = 5;
     private const int MaxErrorLogLength = 500;
+    private static readonly TimeSpan StaleUploadTimeout = TimeSpan.FromHours(2);
 
     private readonly IClipStorage _storage;
+    private readonly IDirectUploadService _directUploadService;
     private readonly ILogger<RawClipService> _logger;
     private readonly IOptions<VideoProcessingOptions> _options;
     private readonly Dictionary<string, RawClipJob> _jobs = new();
@@ -30,10 +32,12 @@ public class RawClipService : IRawClipService, IDisposable
     public RawClipService(
         IWebHostEnvironment env,
         IClipStorage storage,
+        IDirectUploadService directUploadService,
         IOptions<VideoProcessingOptions> options,
         ILogger<RawClipService> logger)
     {
         _storage = storage;
+        _directUploadService = directUploadService;
         _options = options;
         _logger = logger;
 
@@ -57,6 +61,8 @@ public class RawClipService : IRawClipService, IDisposable
             Id = jobId,
             UserId = string.IsNullOrWhiteSpace(userId) ? "anonymous" : userId,
             SourceFileName = filename,
+            SourceFileSizeBytes = fileSize,
+            SourceContentType = contentType,
             SourceBlobPath = $"jobs/{jobId}/source.mp4",
             Status = RawClipJobStatus.Uploading,
             StatusMessage = "Saving uploaded video…",
@@ -106,6 +112,77 @@ public class RawClipService : IRawClipService, IDisposable
         _logger.LogInformation("Stage=UploadComplete Job={JobId} Path={BlobPath}", job.Id, job.SourceBlobPath);
 
         return Clone(job);
+    }
+
+    public Task<RawClipJob> InitiateDirectUploadAsync(string jobId, string filename, long fileSize, string? contentType, string sourceIngressBlobName, string userId = "anonymous", CancellationToken cancellationToken = default)
+    {
+        ValidateUpload(filename, fileSize, contentType);
+        if (!Guid.TryParse(jobId, out _))
+            throw new InvalidOperationException("Job id is invalid.");
+        var job = new RawClipJob
+        {
+            Id = jobId,
+            UserId = string.IsNullOrWhiteSpace(userId) ? "anonymous" : userId,
+            SourceFileName = filename,
+            SourceFileSizeBytes = fileSize,
+            SourceContentType = contentType,
+            SourceBlobPath = $"jobs/{jobId}/source.mp4",
+            SourceIngressBlobName = sourceIngressBlobName,
+            Status = RawClipJobStatus.Uploading,
+            StatusMessage = "Waiting for upload completion…",
+            FfmpegAvailable = IsFfmpegAvailable(),
+            CreatedAtUtc = DateTime.UtcNow,
+            UpdatedAtUtc = DateTime.UtcNow,
+            ExpiresAtUtc = DateTime.UtcNow.AddHours(24)
+        };
+
+        UpdateJob(job, j =>
+        {
+            j.History.Add(new RawClipJobHistoryEntry
+            {
+                Status = j.Status,
+                ProgressPercent = j.ProgressPercent,
+                Message = j.StatusMessage
+            });
+        }, persist: false);
+
+        lock (_jobsLock)
+        {
+            _jobs[job.Id] = job;
+            SaveJobsUnsafe();
+        }
+
+        _logger.LogInformation("Stage=DirectUploadInitiated Job={JobId} User={UserId} Blob={BlobName}", job.Id, job.UserId, sourceIngressBlobName);
+        return Task.FromResult(Clone(job));
+    }
+
+    public Task<RawClipJob?> CompleteDirectUploadAsync(string jobId, string? userId = null, CancellationToken cancellationToken = default)
+    {
+        lock (_jobsLock)
+        {
+            if (!_jobs.TryGetValue(jobId, out var job))
+                return Task.FromResult<RawClipJob?>(null);
+            if (!string.IsNullOrWhiteSpace(userId) && !string.Equals(job.UserId, userId, StringComparison.OrdinalIgnoreCase))
+                return Task.FromResult<RawClipJob?>(null);
+            if (job.Status != RawClipJobStatus.Uploading)
+                return Task.FromResult<RawClipJob?>(Clone(job));
+
+            job.ProgressPercent = 0;
+            job.Status = RawClipJobStatus.Queued;
+            job.StatusMessage = "Queued for background processing";
+            job.ErrorMessage = string.Empty;
+            job.CompletedAtUtc = null;
+            job.UpdatedAtUtc = DateTime.UtcNow;
+            job.History.Add(new RawClipJobHistoryEntry
+            {
+                Status = job.Status,
+                ProgressPercent = job.ProgressPercent,
+                Message = job.StatusMessage
+            });
+            SaveJobsUnsafe();
+            _logger.LogInformation("Stage=DirectUploadComplete Job={JobId} Blob={BlobName}", job.Id, job.SourceIngressBlobName);
+            return Task.FromResult<RawClipJob?>(Clone(job));
+        }
     }
 
     public RawClipJob? GetJob(string jobId)
@@ -217,9 +294,10 @@ public class RawClipService : IRawClipService, IDisposable
 
     public void DeleteJob(string jobId)
     {
+        RawClipJob? removedJob;
         lock (_jobsLock)
         {
-            if (!_jobs.Remove(jobId))
+            if (!_jobs.Remove(jobId, out removedJob))
                 return;
             SaveJobsUnsafe();
         }
@@ -232,6 +310,9 @@ public class RawClipService : IRawClipService, IDisposable
         {
             _logger.LogWarning(ex, "Could not delete files for job {JobId}", jobId);
         }
+
+        if (_directUploadService.IsConfigured && !string.IsNullOrWhiteSpace(removedJob?.SourceIngressBlobName))
+            DeleteIngressBlob(removedJob.SourceIngressBlobName, jobId);
     }
 
     public void Dispose() => _cleanupTimer.Dispose();
@@ -243,6 +324,17 @@ public class RawClipService : IRawClipService, IDisposable
             _logger.LogInformation("Stage=ProcessStart Job={JobId}", job.Id);
 
             var sourcePath = _storage.GetAbsolutePath(job.SourceBlobPath);
+            if (!File.Exists(sourcePath) && !string.IsNullOrWhiteSpace(job.SourceIngressBlobName) && _directUploadService.IsConfigured)
+            {
+                UpdateJob(job, j =>
+                {
+                    j.StatusMessage = "Syncing uploaded video…";
+                    j.ProgressPercent = Math.Max(j.ProgressPercent, 2);
+                });
+
+                await _directUploadService.DownloadBlobAsync(job.SourceIngressBlobName, sourcePath, cancellationToken);
+            }
+
             if (!File.Exists(sourcePath))
                 throw new FileNotFoundException("Source video not found.", sourcePath);
 
@@ -575,11 +667,47 @@ public class RawClipService : IRawClipService, IDisposable
 
     private void CleanupExpiredJobs()
     {
+        var staleUploads = new List<RawClipJob>();
+        var utcNow = DateTime.UtcNow;
+
+        lock (_jobsLock)
+        {
+            foreach (var job in _jobs.Values.Where(j =>
+                         j.Status == RawClipJobStatus.Uploading &&
+                         !string.IsNullOrWhiteSpace(j.SourceIngressBlobName) &&
+                         (utcNow - j.UpdatedAtUtc) >= StaleUploadTimeout))
+            {
+                job.Status = RawClipJobStatus.Failed;
+                job.StatusMessage = "Upload expired before completion";
+                job.ErrorMessage = "Upload did not complete in time. Please retry.";
+                job.CompletedAtUtc = utcNow;
+                job.UpdatedAtUtc = utcNow;
+                job.History.Add(new RawClipJobHistoryEntry
+                {
+                    Status = job.Status,
+                    ProgressPercent = job.ProgressPercent,
+                    Message = job.StatusMessage,
+                    ErrorMessage = job.ErrorMessage
+                });
+                staleUploads.Add(job);
+            }
+
+            if (staleUploads.Count > 0)
+                SaveJobsUnsafe();
+        }
+
+        foreach (var stale in staleUploads)
+        {
+            _logger.LogInformation("Marked stale direct-upload job {JobId} as failed", stale.Id);
+            if (_directUploadService.IsConfigured && !string.IsNullOrWhiteSpace(stale.SourceIngressBlobName))
+                DeleteIngressBlob(stale.SourceIngressBlobName, stale.Id);
+        }
+
         List<string> expired;
         lock (_jobsLock)
         {
             expired = _jobs.Values
-                .Where(j => j.ExpiresAtUtc <= DateTime.UtcNow)
+                .Where(j => j.ExpiresAtUtc <= utcNow)
                 .Select(j => j.Id)
                 .ToList();
         }
@@ -588,6 +716,18 @@ public class RawClipService : IRawClipService, IDisposable
         {
             _logger.LogInformation("Auto-deleting expired clip job {JobId}", id);
             DeleteJob(id);
+        }
+    }
+
+    private void DeleteIngressBlob(string blobName, string jobId)
+    {
+        try
+        {
+            _directUploadService.DeleteBlobIfExists(blobName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not delete ingress blob {BlobName} for job {JobId}", blobName, jobId);
         }
     }
 
@@ -607,7 +747,10 @@ public class RawClipService : IRawClipService, IDisposable
             Id = job.Id,
             UserId = job.UserId,
             SourceFileName = job.SourceFileName,
+            SourceFileSizeBytes = job.SourceFileSizeBytes,
+            SourceContentType = job.SourceContentType,
             SourceBlobPath = job.SourceBlobPath,
+            SourceIngressBlobName = job.SourceIngressBlobName,
             Status = job.Status,
             StatusMessage = job.StatusMessage,
             ProgressPercent = job.ProgressPercent,

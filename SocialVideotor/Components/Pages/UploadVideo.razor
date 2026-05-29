@@ -2,7 +2,9 @@
 @using SocialVideotor.Models
 @using SocialVideotor.Services
 @inject IRawClipService RawClipService
+@inject IHttpClientFactory HttpClientFactory
 @inject IHttpContextAccessor HttpContextAccessor
+@inject IJSRuntime JS
 @inject NavigationManager NavigationManager
 @rendermode InteractiveServer
 @implements IDisposable
@@ -40,7 +42,7 @@
                         </p>
                     }
                     <label style="cursor: pointer; display: inline-block;">
-                        <InputFile OnChange="@OnFileSelected" accept=".mp4" style="display: none;" />
+                        <InputFile id="raw-video-file" OnChange="@OnFileSelected" accept=".mp4" style="display: none;" />
                         <FluentButton Appearance="Appearance.Outline" Style="pointer-events: none;">
                             <FluentIcon Value="@(new Icons.Regular.Size20.FolderOpen())" Slot="start" />
                             @(selectedFile == null ? "Browse Files" : "Change File")
@@ -223,6 +225,7 @@
 
 @code {
     private enum Phase { Idle, Uploading, Processing, Done, Failed }
+    private const string DefaultUploadContentType = "video/mp4";
 
     private Phase phase = Phase.Idle;
     private IBrowserFile? selectedFile;
@@ -256,13 +259,48 @@
 
         try
         {
-            await using var stream = selectedFile.OpenReadStream(maxAllowedSize: maxSize);
-            currentJob = await RawClipService.StartProcessingAsync(
-                stream,
-                selectedFile.Name,
-                selectedFile.Size,
-                selectedFile.ContentType,
-                GetCurrentUserId());
+            var client = HttpClientFactory.CreateClient();
+            client.BaseAddress = new Uri(NavigationManager.BaseUri);
+
+            var capabilities = await client.GetFromJsonAsync<UploadCapabilitiesResponse>("/api/uploads/capabilities");
+            if (capabilities?.DirectUploadEnabled != true)
+            {
+                await UploadViaServerAsync(client);
+                return;
+            }
+
+            var initiateResponse = await client.PostAsJsonAsync("/api/uploads/initiate", new UploadInitiateRequest
+            {
+                FileName = selectedFile.Name,
+                FileSize = selectedFile.Size,
+                ContentType = selectedFile.ContentType
+            });
+
+            if (!initiateResponse.IsSuccessStatusCode)
+                throw new InvalidOperationException(await initiateResponse.Content.ReadAsStringAsync());
+
+            var initiatePayload = await initiateResponse.Content.ReadFromJsonAsync<UploadInitiateResponse>();
+            if (initiatePayload == null)
+                throw new InvalidOperationException("Could not initiate upload.");
+
+            await JS.InvokeVoidAsync(
+                "socialVideotorUpload.uploadSelectedFile",
+                "raw-video-file",
+                initiatePayload.UploadUrl,
+                string.IsNullOrWhiteSpace(selectedFile.ContentType) ? DefaultUploadContentType : selectedFile.ContentType);
+
+            var completeResponse = await client.PostAsJsonAsync("/api/uploads/complete", new UploadCompleteRequest
+            {
+                JobId = initiatePayload.JobId,
+                BlobName = initiatePayload.BlobName
+            });
+
+            if (!completeResponse.IsSuccessStatusCode)
+                throw new InvalidOperationException(await completeResponse.Content.ReadAsStringAsync());
+
+            currentJob = await completeResponse.Content.ReadFromJsonAsync<RawClipJob>();
+            if (currentJob == null)
+                throw new InvalidOperationException("Upload completed but no job was returned.");
             StartPolling();
         }
         catch (Exception ex)
@@ -270,6 +308,33 @@
             errorMessage = ex.Message;
             phase = Phase.Idle;
         }
+    }
+
+    private async Task UploadViaServerAsync(HttpClient client)
+    {
+        if (selectedFile == null)
+            throw new InvalidOperationException("No file selected.");
+
+        await using var stream = selectedFile.OpenReadStream(500L * 1024 * 1024);
+        using var fileContent = new StreamContent(stream);
+        fileContent.Headers.TryAddWithoutValidation(
+            "Content-Type",
+            string.IsNullOrWhiteSpace(selectedFile.ContentType) ? DefaultUploadContentType : selectedFile.ContentType);
+
+        using var form = new MultipartFormDataContent
+        {
+            { fileContent, "file", selectedFile.Name }
+        };
+
+        var uploadResponse = await client.PostAsync("/api/jobs/upload", form);
+        if (!uploadResponse.IsSuccessStatusCode)
+            throw new InvalidOperationException(await uploadResponse.Content.ReadAsStringAsync());
+
+        currentJob = await uploadResponse.Content.ReadFromJsonAsync<RawClipJob>();
+        if (currentJob == null)
+            throw new InvalidOperationException("Upload completed but no job was returned.");
+
+        StartPolling();
     }
 
     private void StartPolling()

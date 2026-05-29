@@ -23,10 +23,12 @@ builder.Services.AddFluentUIComponents();
 builder.Services.AddHttpClient();
 builder.Services.AddHttpContextAccessor();
 builder.Services.Configure<VideoProcessingOptions>(builder.Configuration.GetSection("VideoProcessing"));
+builder.Services.Configure<DirectUploadOptions>(builder.Configuration.GetSection("DirectUpload"));
 builder.Services.AddSingleton<IProjectService, ProjectService>();
 builder.Services.AddScoped<IVideoIndexerService, VideoIndexerService>();
 builder.Services.AddScoped<IVideoAIService, VideoAIService>();
 builder.Services.AddSingleton<IClipStorage, LocalClipStorage>();
+builder.Services.AddSingleton<IDirectUploadService, AzureDirectUploadService>();
 builder.Services.AddSingleton<RawClipService>();
 builder.Services.AddSingleton<IRawClipService>(sp => sp.GetRequiredService<RawClipService>());
 builder.Services.AddHostedService<RawClipProcessingWorker>();
@@ -100,6 +102,93 @@ app.MapPost("/api/jobs/upload", async (
 
     var job = await rawClipService.StartProcessingAsync(stream, file.FileName, file.Length, file.ContentType, userId, cancellationToken);
     return Results.Accepted($"/api/jobs/{job.Id}", job);
+});
+
+app.MapGet("/api/uploads/capabilities", (IDirectUploadService directUploadService) =>
+{
+    return Results.Ok(new UploadCapabilitiesResponse
+    {
+        DirectUploadEnabled = directUploadService.IsConfigured
+    });
+});
+
+app.MapPost("/api/uploads/initiate", async (
+    UploadInitiateRequest request,
+    HttpRequest httpRequest,
+    IRawClipService rawClipService,
+    IDirectUploadService directUploadService,
+    CancellationToken cancellationToken) =>
+{
+    if (!directUploadService.IsConfigured)
+        return Results.BadRequest("Direct upload is not configured.");
+    if (string.IsNullOrWhiteSpace(request.FileName))
+        return Results.BadRequest("FileName is required.");
+    if (request.FileSize <= 0)
+        return Results.BadRequest("FileSize must be greater than zero.");
+
+    var userId = UserIdentityResolver.ResolveForRequest(httpRequest.HttpContext);
+    var tempJobId = Guid.NewGuid().ToString("D");
+    var upload = await directUploadService.CreateUploadUrlAsync(userId, tempJobId, cancellationToken);
+    var job = await rawClipService.InitiateDirectUploadAsync(
+        tempJobId,
+        request.FileName,
+        request.FileSize,
+        request.ContentType,
+        upload.BlobName,
+        userId,
+        cancellationToken);
+
+    return Results.Ok(new UploadInitiateResponse
+    {
+        JobId = job.Id,
+        BlobName = upload.BlobName,
+        UploadUrl = upload.UploadUrl,
+        ExpiresAtUtc = upload.ExpiresAtUtc
+    });
+});
+
+app.MapPost("/api/uploads/complete", async (
+    UploadCompleteRequest request,
+    HttpRequest httpRequest,
+    IRawClipService rawClipService,
+    IDirectUploadService directUploadService,
+    CancellationToken cancellationToken) =>
+{
+    if (!directUploadService.IsConfigured)
+        return Results.BadRequest("Direct upload is not configured.");
+    if (!Guid.TryParse(request.JobId, out _))
+        return Results.BadRequest("Invalid jobId.");
+
+    var userId = UserIdentityResolver.ResolveForRequest(httpRequest.HttpContext);
+    var job = rawClipService.GetJob(request.JobId);
+    if (job == null || !string.Equals(job.UserId, userId, StringComparison.OrdinalIgnoreCase))
+        return Results.NotFound();
+    if (!string.Equals(job.SourceIngressBlobName, request.BlobName, StringComparison.Ordinal))
+        return Results.BadRequest("Blob name does not match initiated upload.");
+
+    var blobProperties = await directUploadService.GetBlobPropertiesAsync(request.BlobName, cancellationToken);
+    if (blobProperties == null)
+        return Results.BadRequest("Uploaded blob was not found.");
+    if (blobProperties.ContentLength <= 0)
+        return Results.BadRequest("Uploaded blob is empty.");
+    if (job.SourceFileSizeBytes > 0 && blobProperties.ContentLength != job.SourceFileSizeBytes)
+        return Results.BadRequest("Uploaded blob size does not match the initiated upload.");
+    if (!string.IsNullOrWhiteSpace(job.SourceContentType))
+    {
+        static string GetBaseContentType(string contentType) => contentType.Split(';', 2)[0].Trim();
+        var expectedContentType = GetBaseContentType(job.SourceContentType);
+        var actualContentType = GetBaseContentType(blobProperties.ContentType);
+        if (string.IsNullOrWhiteSpace(actualContentType))
+            return Results.BadRequest("Uploaded blob is missing a content type.");
+        if (!string.Equals(actualContentType, expectedContentType, StringComparison.OrdinalIgnoreCase))
+            return Results.BadRequest("Uploaded blob content type does not match the initiated upload.");
+    }
+
+    var completedJob = await rawClipService.CompleteDirectUploadAsync(request.JobId, userId, cancellationToken);
+    if (completedJob == null)
+        return Results.NotFound();
+
+    return Results.Accepted($"/api/jobs/{completedJob.Id}", completedJob);
 });
 
 app.MapGet("/api/jobs", (HttpRequest request, IRawClipService rawClipService) =>
