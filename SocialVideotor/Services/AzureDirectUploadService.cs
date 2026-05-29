@@ -83,10 +83,10 @@ public class AzureDirectUploadService : IDirectUploadService
         await blobClient.DownloadToAsync(destinationPath, cancellationToken);
     }
 
-    public async Task DeleteBlobIfExistsAsync(string blobName, CancellationToken cancellationToken = default)
+    public void DeleteBlobIfExists(string blobName)
     {
         var blobClient = GetRequiredContainerClient().GetBlobClient(blobName);
-        await blobClient.DeleteIfExistsAsync(cancellationToken: cancellationToken);
+        blobClient.DeleteIfExists();
     }
 
     private BlobContainerClient GetRequiredContainerClient()

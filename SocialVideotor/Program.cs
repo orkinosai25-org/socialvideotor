@@ -104,6 +104,14 @@ app.MapPost("/api/jobs/upload", async (
     return Results.Accepted($"/api/jobs/{job.Id}", job);
 });
 
+app.MapGet("/api/uploads/capabilities", (IDirectUploadService directUploadService) =>
+{
+    return Results.Ok(new UploadCapabilitiesResponse
+    {
+        DirectUploadEnabled = directUploadService.IsConfigured
+    });
+});
+
 app.MapPost("/api/uploads/initiate", async (
     UploadInitiateRequest request,
     HttpRequest httpRequest,
@@ -167,10 +175,12 @@ app.MapPost("/api/uploads/complete", async (
         return Results.BadRequest("Uploaded blob size does not match the initiated upload.");
     if (!string.IsNullOrWhiteSpace(job.SourceContentType))
     {
-        static string NormalizeContentType(string contentType) => contentType.Split(';', 2)[0].Trim();
-        var expectedContentType = NormalizeContentType(job.SourceContentType);
-        var actualContentType = NormalizeContentType(blobProperties.ContentType);
-        if (string.IsNullOrWhiteSpace(actualContentType) || !string.Equals(actualContentType, expectedContentType, StringComparison.OrdinalIgnoreCase))
+        static string GetBaseContentType(string contentType) => contentType.Split(';', 2)[0].Trim();
+        var expectedContentType = GetBaseContentType(job.SourceContentType);
+        var actualContentType = GetBaseContentType(blobProperties.ContentType);
+        if (string.IsNullOrWhiteSpace(actualContentType))
+            return Results.BadRequest("Uploaded blob is missing a content type.");
+        if (!string.Equals(actualContentType, expectedContentType, StringComparison.OrdinalIgnoreCase))
             return Results.BadRequest("Uploaded blob content type does not match the initiated upload.");
     }
 

@@ -297,9 +297,8 @@ public class RawClipService : IRawClipService, IDisposable
         RawClipJob? removedJob;
         lock (_jobsLock)
         {
-            if (!_jobs.TryGetValue(jobId, out removedJob))
+            if (!_jobs.Remove(jobId, out removedJob))
                 return;
-            _jobs.Remove(jobId);
             SaveJobsUnsafe();
         }
 
@@ -313,9 +312,7 @@ public class RawClipService : IRawClipService, IDisposable
         }
 
         if (_directUploadService.IsConfigured && !string.IsNullOrWhiteSpace(removedJob?.SourceIngressBlobName))
-        {
-            _ = DeleteIngressBlobAsync(removedJob.SourceIngressBlobName, jobId);
-        }
+            DeleteIngressBlob(removedJob.SourceIngressBlobName, jobId);
     }
 
     public void Dispose() => _cleanupTimer.Dispose();
@@ -703,7 +700,7 @@ public class RawClipService : IRawClipService, IDisposable
         {
             _logger.LogInformation("Marked stale direct-upload job {JobId} as failed", stale.Id);
             if (_directUploadService.IsConfigured && !string.IsNullOrWhiteSpace(stale.SourceIngressBlobName))
-                _ = DeleteIngressBlobAsync(stale.SourceIngressBlobName, stale.Id);
+                DeleteIngressBlob(stale.SourceIngressBlobName, stale.Id);
         }
 
         List<string> expired;
@@ -722,11 +719,11 @@ public class RawClipService : IRawClipService, IDisposable
         }
     }
 
-    private async Task DeleteIngressBlobAsync(string blobName, string jobId)
+    private void DeleteIngressBlob(string blobName, string jobId)
     {
         try
         {
-            await _directUploadService.DeleteBlobIfExistsAsync(blobName);
+            _directUploadService.DeleteBlobIfExists(blobName);
         }
         catch (Exception ex)
         {

@@ -225,6 +225,7 @@
 
 @code {
     private enum Phase { Idle, Uploading, Processing, Done, Failed }
+    private const string DefaultUploadContentType = "video/mp4";
 
     private Phase phase = Phase.Idle;
     private IBrowserFile? selectedFile;
@@ -261,6 +262,13 @@
             var client = HttpClientFactory.CreateClient();
             client.BaseAddress = new Uri(NavigationManager.BaseUri);
 
+            var capabilities = await client.GetFromJsonAsync<UploadCapabilitiesResponse>("/api/uploads/capabilities");
+            if (capabilities?.DirectUploadEnabled != true)
+            {
+                await UploadViaServerAsync(client);
+                return;
+            }
+
             var initiateResponse = await client.PostAsJsonAsync("/api/uploads/initiate", new UploadInitiateRequest
             {
                 FileName = selectedFile.Name,
@@ -269,17 +277,7 @@
             });
 
             if (!initiateResponse.IsSuccessStatusCode)
-            {
-                var initiateError = await initiateResponse.Content.ReadAsStringAsync();
-                if (initiateResponse.StatusCode == System.Net.HttpStatusCode.BadRequest &&
-                    initiateError.Contains("Direct upload is not configured.", StringComparison.OrdinalIgnoreCase))
-                {
-                    await UploadViaServerAsync(client);
-                    return;
-                }
-
-                throw new InvalidOperationException(initiateError);
-            }
+                throw new InvalidOperationException(await initiateResponse.Content.ReadAsStringAsync());
 
             var initiatePayload = await initiateResponse.Content.ReadFromJsonAsync<UploadInitiateResponse>();
             if (initiatePayload == null)
@@ -289,7 +287,7 @@
                 "socialVideotorUpload.uploadSelectedFile",
                 "raw-video-file",
                 initiatePayload.UploadUrl,
-                string.IsNullOrWhiteSpace(selectedFile.ContentType) ? "video/mp4" : selectedFile.ContentType);
+                string.IsNullOrWhiteSpace(selectedFile.ContentType) ? DefaultUploadContentType : selectedFile.ContentType);
 
             var completeResponse = await client.PostAsJsonAsync("/api/uploads/complete", new UploadCompleteRequest
             {
@@ -321,7 +319,7 @@
         using var fileContent = new StreamContent(stream);
         fileContent.Headers.TryAddWithoutValidation(
             "Content-Type",
-            string.IsNullOrWhiteSpace(selectedFile.ContentType) ? "video/mp4" : selectedFile.ContentType);
+            string.IsNullOrWhiteSpace(selectedFile.ContentType) ? DefaultUploadContentType : selectedFile.ContentType);
 
         using var form = new MultipartFormDataContent
         {

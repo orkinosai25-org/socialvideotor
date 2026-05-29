@@ -15,6 +15,11 @@ public class UploadInitiateResponse
     public DateTime ExpiresAtUtc { get; set; }
 }
 
+public class UploadCapabilitiesResponse
+{
+    public bool DirectUploadEnabled { get; set; }
+}
+
 public class UploadCompleteRequest
 {
     public string JobId { get; set; } = string.Empty;

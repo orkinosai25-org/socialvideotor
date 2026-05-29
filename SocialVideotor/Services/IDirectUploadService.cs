@@ -7,7 +7,7 @@ public interface IDirectUploadService
     Task<bool> BlobExistsAsync(string blobName, CancellationToken cancellationToken = default);
     Task<DirectUploadBlobProperties?> GetBlobPropertiesAsync(string blobName, CancellationToken cancellationToken = default);
     Task DownloadBlobAsync(string blobName, string destinationPath, CancellationToken cancellationToken = default);
-    Task DeleteBlobIfExistsAsync(string blobName, CancellationToken cancellationToken = default);
+    void DeleteBlobIfExists(string blobName);
 }
 
 public sealed class DirectUploadBlobProperties
